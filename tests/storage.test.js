@@ -1,11 +1,44 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createStorage } from '../src/storage.js';
 const prefs = { codes: ['USD', 'EUR'], source: 'USD', amount: '10.25' };
 const rates = { base: 'USD', checkedAt: 100, rates: { USD: { rate: '1', date: '2026-09-25' }, EUR: { rate: '0.9', date: '2026-09-25' } } };
 function localStore() { const map = new Map(); return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map }; }
 function setup(options = {}) { return createStorage({ indexedDB: new IDBFactory(), localStorage: localStore(), BroadcastChannel: null, ...options }); }
+afterEach(() => vi.useRealTimers());
 describe('storage', () => {
+  it('bounds a stalled open and closes a connection that arrives too late', async () => {
+    vi.useFakeTimers();
+    const request = {};
+    const x = setup({ indexedDB: { open: () => request } });
+    const read = x.readRates();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await read).toBeNull();
+    request.result = { close: vi.fn() };
+    request.onsuccess();
+    expect(request.result.close).toHaveBeenCalledOnce();
+    expect(await x.writeRates(rates)).toBe(false);
+    expect(await x.readRates()).toEqual(rates);
+    x.close();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(['read', 'write'])('aborts a stalled %s transaction and retains memory data', async operation => {
+    vi.useFakeTimers();
+    const transaction = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    const database = { transaction: () => transaction, close: vi.fn() };
+    const x = setup({ indexedDB: { open() {
+      const request = { result: database };
+      Promise.resolve().then(() => request.onsuccess());
+      return request;
+    } } });
+    const pending = operation === 'read' ? x.readRates() : x.writeRates(rates);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await pending).toBe(operation === 'read' ? null : false);
+    expect(transaction.abort).toHaveBeenCalledOnce();
+    x.close();
+    if (operation === 'write') expect(await x.readRates()).toEqual(rates);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('round trips preferences, rates and catalog without mixing records', async () => {
     const x = setup(); const catalog = { items: [{ code: 'USD', name: 'Dollar', symbol: '$' }], checkedAt: 123 };
     expect(x.writePreferences(prefs)).toBe(true); expect(x.readPreferences()).toEqual(prefs);
