@@ -33,7 +33,7 @@ npm run preview
 
 Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `npm run check:size` after a build to check the limits of 25 KiB gzip for initial JavaScript and 75 KiB compressed for the page and offline installation together. The report lists the service worker separately. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
 
-The **Check** workflow runs validation and uploads failure reports. The separate **Deploy GitHub Pages** workflow can publish after you enable Pages and its checks pass. A local test pass does not show that CI has run: CI requires a workflow run.
+The **Check and deploy** workflow runs the full check on pull requests and pushes to `main`. A manual run on any branch runs the check. Only a run on `main` reads Pages settings and can deploy. The workflow runs `npm run check` once. A main run then makes a separate build for the Pages base path. This build does not run the test suite again. A local check does not show that CI ran. CI requires a workflow run.
 
 Run the read-only live API check separately:
 
@@ -45,9 +45,9 @@ Set `FEX_SMOKE_ORIGIN=https://your-domain.example` to inspect CORS response head
 
 ## GitHub Pages
 
-The repository includes a deployment workflow for `poltak/fex`. Open [Settings → Pages](https://github.com/poltak/fex/settings/pages), set **Source** to **GitHub Actions**, then open **Actions → Deploy GitHub Pages → Run workflow** and run it once on `main`. Later pushes to `main` deploy automatically. The default public URL is `https://poltak.github.io/fex/`; it is not confirmed live until deployment succeeds.
+The repository includes a deployment workflow for `poltak/fex`. Open [Settings → Pages](https://github.com/poltak/fex/settings/pages), set **Source** to **GitHub Actions**, then open **Actions → Check and deploy → Run workflow** and run it once on `main`. Later pushes to `main` deploy automatically. The default public URL is `https://poltak.github.io/fex/`; it is not confirmed live until deployment succeeds.
 
-If Pages is still disabled, the workflow builds for `/fex/` and explains the remaining setting in its summary. It skips deployment and does not enable Pages through the API. Once enabled, the workflow reads the Pages base path, including a later custom-domain configuration. GitHub Pages supports public repositories on GitHub Free, so a paid host is not required. GitHub Pages ignores `_headers`; the Cloudflare header policy is not applied there. See [deployment steps and limits](docs/DEPLOYMENT.md).
+If Pages is still disabled, a run on `main` builds for `/fex/` and explains the required setting in its summary. It skips deployment and does not enable Pages through the API. Once enabled, the workflow reads the Pages base path, including a later custom-domain configuration. GitHub Pages supports public repositories on GitHub Free, so a paid host is not required. GitHub Pages ignores `_headers`; the Cloudflare header policy is not applied there. See [deployment steps and limits](docs/DEPLOYMENT.md).
 
 ## Data and privacy
 

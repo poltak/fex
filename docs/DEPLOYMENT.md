@@ -10,16 +10,18 @@ After the workflow is on `main`:
 
 1. Open [poltak/fex Pages settings](https://github.com/poltak/fex/settings/pages).
 2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-3. Open **Actions → Deploy GitHub Pages → Run workflow**. Select `main` and run it once.
+3. Open **Actions → Check and deploy → Run workflow**. Select `main` and run it once.
 4. Open the deployment URL from the completed run. Later pushes to `main` run the workflow automatically.
 
-The first push can occur while Pages is disabled. The workflow reads Pages metadata with the repository token. HTTP 404 or a source other than GitHub Actions produces a job summary with the setup steps; it validates and builds for `/fex/`, then skips configuration, artifact upload, and deployment. Other API errors fail the job so that permission and service problems remain visible. The workflow never enables Pages through the API.
+The **Check and deploy** workflow runs on pull requests, pushes to `main`, and manual runs. A manual run on `main` can deploy. A manual run on another branch runs checks only. It does not read Pages settings, configure Pages, upload a Pages artifact, or deploy. Pull requests run checks only.
 
-Once Pages is enabled, `configure-pages` supplies the deployment base path. The workflow runs the complete root check, rebuilds for that path, checks size, uploads the static artifact, and deploys it with the `github-pages` environment. The path can change if a custom domain is configured later; it is not fixed to `/fex/` for enabled deployments. A manual workflow run from another branch does not deploy.
+The full check runs once per workflow run. Its browser tests use the root path. A run on `main` then reads Pages settings with the repository token. If the API returns HTTP 404, or Pages uses a source other than GitHub Actions, the job summary explains the setup steps. The workflow builds for `/fex/`, then skips Pages configuration, artifact upload, and deployment. Other API errors fail the job. The workflow never enables Pages through the API.
+
+Once Pages is enabled, `configure-pages` supplies the deployment base path. The workflow makes a separate build for that path, checks its size, uploads the static artifact, and deploys it with the `github-pages` environment. This build does not run the test suite again. The path can change if a custom domain is configured later. It is not fixed to `/fex/` for enabled deployments.
 
 GitHub Pages does not apply Cloudflare's `_headers` file. The production build also puts the supported CSP directives in HTML, so they work on GitHub Pages. The `/fex/` browser tests verify that this policy blocks inline scripts without HTTP security headers. HTML cannot enforce `frame-ancestors` or add the other response headers; check the actual deployed headers if those controls are required. A host with custom header support can apply the complete supplied policy.
 
-The separate **Check** workflow still runs validation without deployment. No personal access token or Cloudflare secret is required for the Pages workflow; it uses GitHub's job token and deployment identity token. The site is not confirmed live merely because these files exist. Confirm the successful workflow result and check the actual public URL after enabling Pages.
+No personal access token or Cloudflare secret is required; the workflow uses GitHub's job token and deployment identity token. The site is not confirmed live merely because these files exist. Confirm the successful workflow result and check the actual public URL after enabling Pages.
 
 ## Build for the correct path
 
