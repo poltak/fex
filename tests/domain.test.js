@@ -10,6 +10,16 @@ describe('amount parsing', () => {
   it('keeps draft states', () => { expect(parseAmount({text:''}).status).toBe('empty'); expect(parseAmount({text:'1.'}).status).toBe('incomplete'); expect(parseAmount({text:'.'}).status).toBe('incomplete'); expect(parseAmount({text:'0'}).value).toBe('0'); });
   it('accepts an unambiguous alternative decimal', () => { expect(parseAmount({text:'1.25',locale:'de-DE'}).value).toBe('1.25'); expect(parseAmount({text:'1.234',locale:'de-DE'}).value).toBe('1234'); });
   it('enforces entered limits', () => { expect(parseAmount({text:'999999999999999.123456789012'}).status).toBe('valid'); expect(parseAmount({text:'1000000000000000'}).status).toBe('invalid'); expect(parseAmount({text:'0.1234567890123'}).status).toBe('invalid'); expect(parseAmount({text:'0.1234567890123',enforceLimits:false}).status).toBe('valid'); });
+  it.each(['ar-EG', 'fa-IR', 'bn-BD', 'hi-IN', 'de-CH'])('accepts its own editable and grouped values in %s', locale => {
+    const amount = '123456.78';
+    for (const text of [formatEditable({ amount, locale }), new Intl.NumberFormat(locale).format(Number(amount))]) {
+      expect(parseAmount({ text, locale })).toEqual({ status: 'valid', value: amount });
+    }
+  });
+  it('rejects malformed Indian groups instead of changing the amount', () => {
+    expect(parseAmount({ text: '12,34,567.89', locale: 'en-IN' }).value).toBe('1234567.89');
+    for (const text of ['123,45,678', '1,234,56', '1,23,456,789']) expect(parseAmount({ text, locale: 'en-IN' }).status).toBe('invalid');
+  });
 });
 describe('decimal conversion', () => {
   it('uses exact cross rates and USD identity', () => { expect(convertAmount({amount:'10',source:'EUR',target:'VND',rates})).toBe('312500'); expect(convertAmount({amount:'10.1234',source:'USD',target:'USD',rates:{}})).toBe('10.1234'); });
@@ -37,6 +47,10 @@ describe('presentation', () => {
   it('preserves tiny nonzero results', () => { expect(formatAmount({amount:'0.000001',currency:'USD'})).toBe('<0.01'); expect(formatAmount({amount:'0.1',currency:'VND'})).toBe('<1'); expect(formatAmount({amount:'0',currency:'USD'})).toBe('0.00'); expect(formatUnitRate({source:'VND',target:'USD',rates})).toBe('1 VND ≈ 0.00004 USD'); });
   it('handles large amounts without Number precision loss', () => expect(formatAmount({amount:'12345678901234567890.125',currency:'USD'})).toBe('12,345,678,901,234,567,890.13'));
   it('keeps full editable precision', () => expect(formatEditable({amount:'0.0000000000001234567890123456789',locale:'vi-VN'})).toBe('0,0000000000001234567890123456789'));
+  it('uses the same digit system for whole and fractional digits', () => {
+    expect(formatEditable({ amount: '123.45', locale: 'ar-EG' })).toBe('١٢٣٫٤٥');
+    expect(formatAmount({ amount: '123.45', currency: 'USD', locale: 'ar-EG' })).toBe('١٢٣٫٤٥');
+  });
   it('uses currency minor units', () => { expect(formatAmount({amount:'1.2345',currency:'KWD'})).toBe('1.235'); expect(formatAmount({amount:'1234.5',currency:'VND',locale:'vi-VN'})).toBe('1.235'); });
 });
 describe('metadata and dates', () => {

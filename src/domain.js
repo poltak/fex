@@ -2,33 +2,53 @@ import Decimal from 'decimal.js-light';
 
 Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP, toExpNeg: -100, toExpPos: 100 });
 
-const separatorCache = new Map();
+const numberLocaleCache = new Map();
 const integerFormatCache = new Map();
 const minorUnitCache = new Map();
 
 /** @typedef {Record<string, {rate:string, date:string}>} Rates */
 /** @param {string} locale */
-function separators(locale) {
-  if (separatorCache.has(locale)) return separatorCache.get(locale);
-  const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
-  const result = { decimal: parts.find(p => p.type === 'decimal')?.value || '.', group: parts.find(p => p.type === 'group')?.value || ',' };
-  separatorCache.set(locale, result);
+function numberLocale(locale) {
+  if (numberLocaleCache.has(locale)) return numberLocaleCache.get(locale);
+  const parts = new Intl.NumberFormat(locale).formatToParts(123456789.1);
+  const integerGroups = parts.filter(part => part.type === 'integer').map(part => [...part.value].length);
+  const digitFormat = new Intl.NumberFormat(locale, { useGrouping: false });
+  const digits = Array.from({ length: 10 }, (_, digit) => digitFormat.format(digit));
+  const result = {
+    decimal: parts.find(part => part.type === 'decimal')?.value || '.',
+    group: parts.find(part => part.type === 'group')?.value || ',',
+    primaryGroup: integerGroups.at(-1) || 3,
+    secondaryGroup: integerGroups.at(-2) || 3,
+    digits,
+    asciiDigits: digits.join('') === '0123456789',
+    toAscii: new Map(digits.map((digit, index) => [digit, String(index)])),
+  };
+  numberLocaleCache.set(locale, result);
   return result;
+}
+
+function validGroups({ text, separator, primaryGroup, secondaryGroup }) {
+  const groups = text.split(separator);
+  return groups.length > 1 && groups.every(group => /^\d+$/.test(group))
+    && groups.at(-1).length === primaryGroup
+    && groups[0].length <= secondaryGroup
+    && groups.slice(1, -1).every(group => group.length === secondaryGroup);
 }
 
 /** @param {{text:string,locale?:string,enforceLimits?:boolean}} options
  * @returns {{status:'valid'|'empty'|'incomplete'|'invalid',value?:string,message?:string}} */
 export function parseAmount({ text, locale = 'en-US', enforceLimits = true }) {
-  const raw = text.trim();
+  const settings = numberLocale(locale);
+  const trimmed = text.trim();
+  const raw = settings.asciiDigits ? trimmed : [...trimmed].map(char => settings.toAscii.get(char) ?? char).join('');
   if (!raw) return { status: 'empty' };
   const invalid = (message = 'Enter a number with valid decimal and grouping separators.') => ({ status: /** @type {'invalid'} */ ('invalid'), message });
   if (raw.includes('-')) return invalid('Enter zero or a positive amount.');
-  if (!/^[0-9.,\s\u00a0\u202f]+$/.test(raw)) return invalid();
-  const { decimal, group } = separators(locale);
+  const { decimal, group } = settings;
   let decimalChar = decimal;
   // A point is an alternate decimal only if it cannot be a valid local group.
   if (decimal !== '.' && !raw.includes(decimal) && raw.includes('.')) {
-    const grouped = /^\d{1,3}(?:\.\d{3})+$/.test(raw);
+    const grouped = validGroups({ text: raw, separator: '.', ...settings });
     if (group !== '.' || !grouped) decimalChar = '.';
   }
   const pieces = raw.split(decimalChar);
@@ -41,7 +61,7 @@ export function parseAmount({ text, locale = 'en-US', enforceLimits = true }) {
   if (groupTokens.length) {
     const normalized = whole.replace(/[\u00a0\u202f]/g, ' ');
     const used = [...new Set([...normalized].filter(c => !/[0-9]/.test(c)))];
-    if (used.length !== 1 || !/^\d{1,3}(?:[^0-9]\d{3})+$/.test(normalized)) return invalid();
+    if (used.length !== 1 || !validGroups({ text: normalized, separator: used[0], ...settings })) return invalid();
   }
   if (fraction !== undefined && !/^\d*$/.test(fraction)) return invalid();
   const digits = whole.replace(/[^0-9]/g, '');
@@ -81,7 +101,9 @@ function localize(value, locale, grouped = true) {
   const key = `${locale}:${grouped}`;
   if (!integerFormatCache.has(key)) integerFormatCache.set(key, new Intl.NumberFormat(locale, { useGrouping: grouped, maximumFractionDigits: 0 }));
   const integer = integerFormatCache.get(key).format(BigInt(whole));
-  return integer + (fraction === undefined ? '' : separators(locale).decimal + fraction);
+  const settings = numberLocale(locale);
+  const localizedFraction = settings.asciiDigits ? fraction : fraction?.replace(/\d/g, digit => settings.digits[Number(digit)]);
+  return integer + (fraction === undefined ? '' : settings.decimal + localizedFraction);
 }
 
 /** @param {{amount:string,currency:string,locale?:string}} options */
