@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c0e0d" />
+    <meta name="description" content="A simple currency converter. Edit any amount, compare all your currencies, and take your saved rates offline." />
+    <meta property="og:title" content="Fex — Currency, simply." />
+    <meta property="og:description" content="All your currencies. One simple view. Free, private, and ready to go offline." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/social.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <title>Fex — Currency, simply.</title>
+  </head>
+  <body>
+    <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-arrows" viewBox="0 0 24 24"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4" /></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+      <symbol id="icon-up" viewBox="0 0 24 24"><path d="m6 14 6-6 6 6" /></symbol>
+      <symbol id="icon-down" viewBox="0 0 24 24"><path d="m6 10 6 6 6-6" /></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="icon-external" viewBox="0 0 24 24"><path d="M14 4h6v6m0-6L10 14M10 5H5v14h14v-5" /></symbol>
+    </svg>
+
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand" aria-label="Fex currency converter">
+          <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#icon-arrows" /></svg></span>
+          <span class="brand-name">Fex<span class="brand-dot">.</span></span>
+        </div>
+        <button id="menu-open" class="icon-button" aria-label="Open app menu" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#icon-more" /></svg></button>
+      </header>
+
+      <main>
+        <div class="list-heading">
+          <div><p class="eyebrow">CURRENCY, SIMPLY</p><h1>Your currencies<span id="currency-count" class="count">8</span></h1></div>
+          <button id="add-open" class="button add-button" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#icon-plus" /></svg><span>Add<span class="wide-label"> currency</span></span></button>
+        </div>
+        <p class="intro">Edit any amount. Everything else follows.</p>
+        <p id="storage-notice" class="notice" role="status" hidden>Changes may not be saved on this device.</p>
+        <noscript><p class="notice">Enable JavaScript to convert currencies. Fex does all calculations in your browser.</p></noscript>
+        <div id="currency-list" class="currency-list" aria-label="Your selected currencies" aria-busy="true"></div>
+        <div id="rate-status" class="rate-status" data-phase="loading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div class="status-copy"><p id="status-primary">Getting your rates…</p><p id="status-secondary" class="muted">Reference rates from Frankfurter</p></div>
+          <button id="retry" class="text-button" hidden>Retry</button>
+        </div>
+        <footer class="app-footer"><span>Small app. Wide world.</span><button id="rates-open" class="text-button">About the rates <span aria-hidden="true">↗</span></button></footer>
+      </main>
+    </div>
+
+    <template id="card-template">
+      <article class="currency-card">
+        <div class="card-main">
+          <label class="currency-identity"><span class="currency-badge" aria-hidden="true"></span><span class="identity-copy"><span class="currency-code"></span><span class="currency-name"></span></span></label>
+          <input class="amount" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="—" />
+        </div>
+        <div class="card-bottom"><span class="source-label">Source</span><span class="unit-rate"></span></div>
+        <p class="field-error" hidden></p>
+      </article>
+    </template>
+
+    <dialog id="picker" class="dialog picker-dialog" aria-labelledby="picker-title">
+      <div class="dialog-header"><div><p class="eyebrow">A WIDER VIEW</p><h2 id="picker-title">Add currencies</h2></div><button class="icon-button" data-close="picker" aria-label="Close currency picker"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <div class="search-field"><svg class="icon" aria-hidden="true"><use href="#icon-search" /></svg><input id="currency-search" type="search" placeholder="Search name or code" aria-label="Search currencies" autocomplete="off" /><button id="search-clear" class="icon-button" aria-label="Clear search" hidden><svg class="icon small" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <p id="picker-count" class="dialog-hint"></p>
+      <div id="picker-options" class="picker-options"></div>
+      <p id="no-currencies" class="empty-state" hidden>No currencies found. Try a name or a three-letter code.</p>
+      <div class="dialog-actions"><button class="button secondary" data-close="picker">Cancel</button><button id="picker-add" class="button primary" disabled>Add currencies</button></div>
+    </dialog>
+
+    <dialog id="manage" class="dialog" aria-labelledby="manage-title">
+      <div class="dialog-header"><div><p class="eyebrow">MAKE IT YOURS</p><h2 id="manage-title">Manage currencies</h2></div><button class="icon-button" data-close="manage" aria-label="Close currency management"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <p class="dialog-hint">Move or remove currencies. Drag rows to reorder on desktop.</p>
+      <div id="manage-list" class="manage-list"></div>
+      <div class="dialog-actions"><span id="manage-feedback" class="manage-feedback" role="status"></span><button id="manage-undo" class="text-button" hidden>Undo</button><button class="button primary" data-close="manage">Done</button></div>
+    </dialog>
+
+    <dialog id="menu" class="dialog menu-dialog" aria-labelledby="menu-title">
+      <div class="dialog-header"><h2 id="menu-title">A few things</h2><button class="icon-button" data-close="menu" aria-label="Close menu"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <div class="menu-items"><button id="manage-open">Manage currencies <span aria-hidden="true">↗</span></button><button id="install-open" hidden>Install Fex <span aria-hidden="true">↗</span></button><button id="menu-rates">About the rates <span aria-hidden="true">↗</span></button></div>
+      <p class="dialog-hint">Your list stays on this device. No account needed.</p>
+    </dialog>
+
+    <dialog id="about" class="dialog" aria-labelledby="about-title">
+      <div class="dialog-header"><div><p class="eyebrow">A LITTLE CONTEXT</p><h2 id="about-title">About the rates</h2></div><button class="icon-button" data-close="about" aria-label="Close rate details"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <div class="dialog-content prose">
+        <p>Fex uses daily reference rates from <a href="https://frankfurter.dev/" target="_blank" rel="noopener noreferrer">Frankfurter</a>. They are estimates. Your bank, card, or money changer may offer a different rate.</p>
+        <p>Rates are checked automatically while you use the app, at most once an hour during normal use. Each currency can have a different rate date. A recent check does not mean a new rate was published.</p>
+        <p>Saved rates work offline. The dates below show the data used for your current results.</p>
+        <dl id="rate-details" class="rate-details"></dl>
+        <p>Your amounts and selected list stay in this browser. Fex requests a general rate table; it does not send your amounts. The hosting and rate services receive normal network request information.</p>
+        <p><a href="https://frankfurter.dev/license/" target="_blank" rel="noopener noreferrer">Data sources and their terms <span aria-hidden="true">↗</span></a></p>
+      </div>
+      <div class="dialog-actions"><button class="button primary" data-close="about">Got it</button></div>
+    </dialog>
+
+    <dialog id="install-help" class="dialog" aria-labelledby="install-title">
+      <div class="dialog-header"><h2 id="install-title">Fex, a tap away</h2><button class="icon-button" data-close="install-help" aria-label="Close installation help"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <div class="dialog-content prose"><p>In your browser, open the Share menu and choose <strong>Add to Home Screen</strong>. Then tap Add.</p><p>Open Fex once while online to save the app and rates for offline use. Your saved list belongs to this browser and domain.</p></div>
+      <div class="dialog-actions"><button class="button primary" data-close="install-help">Got it</button></div>
+    </dialog>
+
+    <div id="update-notice" class="update-notice" role="status" hidden><span>A fresh version of Fex is ready.</span><button id="update-now" class="text-button">Update</button><button id="update-later" class="icon-button" aria-label="Update later"><svg class="icon small" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden><span id="toast-message"></span><button id="undo" class="text-button" hidden>Undo</button></div>
+    <p id="announcer" class="sr-only" aria-live="polite"></p>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
