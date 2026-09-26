@@ -24,6 +24,16 @@ export async function createPwaServer({ base }) {
   }));
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
+    if (pathname === '/broader-worker.js') {
+      response.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' });
+      response.end("self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));");
+      return;
+    }
+    if (pathname === '/broader.html') {
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      response.end('<!doctype html><title>Existing root app</title>');
+      return;
+    }
     if (!pathname.startsWith(base)) { response.writeHead(404); response.end('Outside Fex'); return; }
     const relative = decodeURIComponent(pathname.slice(base.length)) || 'index.html';
     const file = path.resolve(directories[version], relative);

@@ -79,6 +79,7 @@ async function lifecycle({ browser, base, offline }) {
     const oldTab = await context.newPage();
     await oldTab.goto(server.url);
     await waitForWorker(oldTab);
+    const oldTabStart = await oldTab.evaluate(() => performance.timeOrigin);
     await page.bringToFront();
     const documentStart = await page.evaluate(() => performance.timeOrigin);
     server.useVersion('B');
@@ -99,6 +100,8 @@ async function lifecycle({ browser, base, offline }) {
     await expect(page.locator('#update-notice')).toBeHidden();
     expect(await page.evaluate(async () => (await caches.keys()).some(key => key.endsWith('browser-B')))).toBe(true);
     expect(await page.evaluate(async () => (await caches.keys()).some(key => key.endsWith('browser-A')))).toBe(true);
+    await expect(oldTab.locator('#update-notice')).toBeHidden();
+    expect(await oldTab.evaluate(() => performance.timeOrigin)).toBe(oldTabStart);
     await oldTab.close();
     // WebKit can retain a just-closed client briefly. A later resume retries cleanup.
     await expect.poll(() => page.evaluate(async () => {
@@ -159,3 +162,44 @@ for (const base of ['/', '/fex/']) {
     await lifecycle({ browser, base, offline: true });
   });
 }
+
+test('first Fex install under a broader worker has no false update prompt', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const server = await createPwaServer({ base: '/fex/' });
+  const context = await browser.newContext({ locale: 'en-US', serviceWorkers: 'allow' });
+  try {
+    await serveRates(context);
+    const page = await context.newPage();
+    await page.goto(`${server.origin}/broader.html`);
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.register('/broader-worker.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+    });
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toBe(`${server.origin}/broader-worker.js`);
+    // WebKit can bypass Playwright network routes under the broader worker.
+    // Seed fresh real storage so this lifecycle regression never needs live rates.
+    await page.evaluate(async ({ catalog, values }) => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('fex-cache', 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('cache');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const date = new Date().toISOString().slice(0, 10);
+      const checkedAt = Date.now();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('cache', 'readwrite');
+        tx.objectStore('cache').put({ version: 1, value: { base: 'USD', checkedAt, rates: Object.fromEntries(Object.entries(values).map(([code, rate]) => [code, { rate: String(rate), date }])) } }, 'rates');
+        tx.objectStore('cache').put({ version: 1, value: { items: catalog, checkedAt } }, 'catalog');
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    }, { catalog: FALLBACK_CATALOG, values });
+    await page.goto(server.url);
+    await expect(page.locator('#amount-EUR')).toHaveValue('9.00');
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toBe(`${server.url}sw.js`);
+    expect(await page.evaluate(async () => !!(await navigator.serviceWorker.getRegistration()).waiting)).toBe(false);
+    await expect(page.locator('#update-notice')).toBeHidden();
+  } finally { await context.close(); await server.close(); }
+});

@@ -441,7 +441,7 @@ async function updateCatalog() {
 }
 
 const pwa = createPwa({
-  onUpdate: () => { $('update-notice').hidden = false; },
+  onUpdate: available => { $('update-notice').hidden = !available; },
   onInstallAvailable: available => { installAvailable = available; renderInstall(); },
   onInstalled: () => { $('install-open').hidden = true; toast('Fex is ready on your home screen.'); },
   onOfflineReady: () => { /* Status stays about data, not implementation details. */ },

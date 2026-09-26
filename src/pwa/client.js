@@ -12,6 +12,9 @@ export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, 
     removers.push(() => target.removeEventListener(name, fn));
   };
   const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || /** @type {Navigator & {standalone?: boolean}} */ (navigator).standalone === true;
+  const syncUpdate = () => {
+    if (!disposed) onUpdate(Boolean(registration?.active && registration.waiting?.state === 'installed'));
+  };
   const announceReady = () => {
     if (!disposed && !document.hidden) navigator.serviceWorker?.controller?.postMessage({ type: 'FEX_CLIENT_READY', version: __FEX_BUILD_ID__ });
   };
@@ -24,6 +27,7 @@ export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, 
     installPrompt = undefined; onInstallAvailable(false); onInstalled();
   });
   if ('serviceWorker' in navigator) listen(navigator.serviceWorker, 'controllerchange', () => {
+    syncUpdate();
     if (accepted && !reloaded) { reloaded = true; window.location.reload(); }
     else announceReady();
   });
@@ -34,24 +38,23 @@ export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, 
       try {
         registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL, updateViaCache: 'none' });
         if (disposed) return;
-        if (registration.waiting) onUpdate(true);
-        const watch = () => {
-          const worker = registration.installing;
+        const observe = worker => {
           if (!worker) return;
           listen(worker, 'statechange', () => {
-            if (worker.state === 'installed') {
-              if (navigator.serviceWorker.controller) onUpdate(true);
-              else onOfflineReady();
-            }
+            syncUpdate();
+            if (worker.state === 'installed' && !registration.active) onOfflineReady();
           });
         };
+        const watch = () => observe(registration.installing);
         listen(registration, 'updatefound', watch);
+        observe(registration.waiting);
         watch();
+        syncUpdate();
         announceReady();
       } catch { /* Conversion still works when the browser blocks service workers. */ }
     },
     update() {
-      if (!registration?.waiting) return false;
+      if (!registration?.waiting) { syncUpdate(); return false; }
       accepted = true;
       registration.waiting.postMessage({ type: 'FEX_ACCEPT_UPDATE' });
       return true;
