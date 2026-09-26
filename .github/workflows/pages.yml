@@ -1,0 +1,110 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      pages_enabled: ${{ steps.metadata.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Read Pages configuration without enabling it
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const response = await fetch(`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/pages`, {
+            headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' },
+            signal: AbortSignal.timeout(15000),
+          });
+          let enabled = false;
+          let reason;
+          if (response.status === 404) {
+            reason = 'GitHub Pages is not enabled for this repository.';
+          } else if (response.ok) {
+            const site = await response.json();
+            enabled = site.build_type === 'workflow';
+            reason = enabled ? 'GitHub Pages is configured to use GitHub Actions.' : 'GitHub Pages is not configured to use GitHub Actions.';
+          } else {
+            throw new Error(`Could not read GitHub Pages configuration: HTTP ${response.status}.`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `enabled=${enabled}\n`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${reason}\n\n` + (enabled
+            ? 'The workflow will validate, build, and deploy the site.\n'
+            : 'The workflow will validate and build for `/fex/`, but deployment is skipped. Open **Settings → Pages**, set **Source** to **GitHub Actions**, then run **Deploy GitHub Pages** from the **Actions** tab on `main`. This workflow does not enable Pages through the API.\n'));
+          NODE
+      - name: Configure enabled Pages site
+        if: steps.metadata.outputs.enabled == 'true'
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+      - name: Install dependencies
+        run: npm ci
+      - name: Install test browsers and system dependencies
+        run: npm exec -- playwright install --with-deps chromium firefox webkit
+      - name: Run release checks on the root build
+        shell: bash
+        run: npm run check 2>&1 | tee check.log
+      - name: Build for the Pages path
+        env:
+          FEX_BASE_PATH: ${{ steps.metadata.outputs.enabled == 'true' && (steps.pages.outputs.base_path || '/') || '/fex/' }}
+          FEX_BUILD_ID: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          npm run build
+          npm run check:size
+      - name: Upload Pages artifact
+        if: steps.metadata.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      - name: Save failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pages-failure-reports
+          path: |
+            check.log
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  deploy:
+    if: needs.build.outputs.pages_enabled == 'true' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4

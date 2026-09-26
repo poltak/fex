@@ -2,6 +2,8 @@
 
 This is the accepted implementation plan, prepared on 26 September 2026. The user approved the name Fex and decimal.js-light, authorized implementation and local Git commits, and deferred the domain choice until deployment. The initial project folder was empty. The user later authorized GPT-6 Sol sub-agents for bounded work, with the primary agent responsible for review and final validation.
 
+Implementation is complete. The user selected `git@github.com:poltak/fex.git` as the remote and requested GitHub Pages support, with Pages enablement left to them. See [verification](docs/VERIFICATION.md) and [deployment](docs/DEPLOYMENT.md) for the current result and release steps.
+
 The main product decisions are set: use plain HTML, CSS, and JavaScript; make startup and interaction speed release requirements; use Frankfurter v2; require no account; show an editable list of currencies; support the full current currency catalog; save each visitor's choices on their device; and refresh rates automatically. The screenshot is the reference for the currency cards. Its top switches, profile control, charts, bottom navigation, and transfer controls are outside this design.
 
 **The first version will have one main screen.**
@@ -196,7 +198,7 @@ This screen has a small and well-defined state model. Native elements and focuse
 | PWA build | vite-plugin-pwa / Workbox | Asset precaching and a controlled update lifecycle. |
 | Unit and UI tests | Vitest, a DOM test environment, and DOM Testing Library if useful | Verify domain functions and native-element interaction. |
 | Browser tests | Playwright | Exercise mobile layouts, storage, errors, and service-worker behavior. |
-| Hosting | Cloudflare Pages | Public HTTPS, custom domains, preview deployments, and static hosting. |
+| Hosting | GitHub Pages | Static publication from the public repository; a custom domain can be added later. |
 
 The only proposed production dependency is decimal.js-light for decimal arithmetic. It is not installed by this plan. Obtain confirmation before installing it, as required by the workspace rules. There will be no React, react-dom, virtual DOM, hydration step, UI component package, client router, or global state package. Build, PWA generation, type-check tooling, and tests are development dependencies. Account for generated service-worker code in the asset budget even though its generator is a development tool. Use npm and commit the lockfile when implementation work is authorized. Select compatible current stable versions at that point.
 
@@ -238,9 +240,9 @@ Expose clear npm scripts for development, build, JSDoc/JavaScript type checks, l
 
 The recommended first deployment is a dedicated subdomain such as a user-chosen currency-app subdomain. The existing main website can link to it. A standalone custom domain also works. The final hostname remains a launch choice; do not assume ownership of any example domain.
 
-Cloudflare Pages currently serves static asset requests for free without a request-count charge. The free plan has other platform limits, such as build limits. This app does not require Pages Functions or a paid exchange-rate plan. Domain registration or renewal remains a separate cost if a new domain is needed. [Static hosting pricing](https://developers.cloudflare.com/pages/functions/pricing/) and [platform limits](https://developers.cloudflare.com/pages/platform/limits/)
+The initial host will be GitHub Pages for the public `poltak/fex` repository. Build the project site for `/fex/`. The Pages workflow will read the configured base path, so a later custom domain can use the correct root path. No app server, account system, or paid exchange-rate plan is required.
 
-For the selected domain, create the Pages project, deploy the tested build, add the domain through Pages, and then configure DNS. A subdomain can use a CNAME at an external DNS provider. An apex domain on Pages requires the corresponding Cloudflare zone and nameserver setup. Do not change nameservers as an incidental step or disturb existing site and mail records. [Custom-domain setup](https://developers.cloudflare.com/pages/configuration/custom-domains/)
+The user will enable GitHub Actions as the Pages source, then run the first publication workflow. Later pushes to `main` can publish after checks pass. The workflow must not enable Pages itself. A later custom domain and its DNS settings are separate decisions; preserve existing site and mail records. Cloudflare Pages remains an optional static host described in the deployment guide.
 
 If the preferred address is instead a path on the existing site, such as /fex/, inspect that site's hosting first. The asset base, manifest ID, start URL, navigation fallback, and service-worker scope must all use that path. The service worker must not control or clear caches for the rest of the site. This is an alternative deployment layout, not an automatic change to the current website.
 
@@ -312,4 +314,4 @@ The finished handoff will include the source code, lockfile, tests, build and re
 
 A new visitor must be able to open the public URL, see the initial list, edit any amount, search the full current catalog, add and arrange currencies, and return later to the same saved list. With saved data, the same conversions must work offline. A one-hour-due refresh must update results without changing the source amount or interrupting input. Every visible result must use a valid rate and an honest date. Installation must preserve the simple screen and use the correct domain and scope. The measured production build must meet the startup, interaction, and asset-size budgets, or the remaining gap must be resolved before release.
 
-The proposed defaults allow development to proceed without another product interview. Before installation, confirm the proposed decimal-arithmetic dependency. Before public deployment, settle the final app name, icon, domain, and hosting account. The first version does not include accounts, transfers, charts, historical-date selection, rate alerts, fees or spread adjustment, cryptocurrency feeds, advertising, or cloud sync. Those features can be evaluated separately if they become useful.
+The app name and decimal-arithmetic dependency are approved. The repository and GitHub Pages workflow are selected. A custom domain can wait. The first version does not include accounts, transfers, charts, historical-date selection, rate alerts, fees or spread adjustment, cryptocurrency feeds, advertising, or cloud sync. Those features can be evaluated separately if they become useful.

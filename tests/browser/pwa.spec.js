@@ -31,8 +31,21 @@ async function lifecycle({ browser, base, offline }) {
   try {
     await serveRates(context);
     let page = await context.newPage();
-    await page.goto(server.url);
+    const initialResponse = await page.goto(server.url);
     await expect(page.locator('#amount-EUR')).toHaveValue('9.00');
+    if (base === '/fex/') expect(initialResponse.headers()['content-security-policy']).toBeUndefined();
+    const policy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
+    expect(policy).toContain("script-src 'self'");
+    expect(policy).not.toContain('frame-ancestors');
+    await page.evaluate(() => {
+      window.addEventListener('securitypolicyviolation', event => { window.__fexCspViolation = event.blockedURI; }, { once: true });
+      const script = document.createElement('script');
+      script.textContent = 'window.__fexInlineCspTest = true';
+      document.head.append(script);
+      script.remove();
+    });
+    await expect.poll(() => page.evaluate(() => window.__fexCspViolation)).toBe('inline');
+    expect(await page.evaluate(() => window.__fexInlineCspTest)).toBeUndefined();
     await waitForWorker(page);
     await waitForSavedRates(page);
     expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).scope)).toBe(server.url);

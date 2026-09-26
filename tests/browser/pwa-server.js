@@ -30,7 +30,7 @@ export async function createPwaServer({ base }) {
     if (!file.startsWith(directories[version] + path.sep)) { response.writeHead(404); response.end(); return; }
     try {
       const content = await readFile(file);
-      response.writeHead(200, { ...headers, 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store', Vary: 'Origin' });
+      response.writeHead(200, { ...(base === '/' ? headers : {}), 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store', Vary: 'Origin' });
       response.end(content);
     } catch { response.writeHead(404); response.end('Not found'); }
   });
