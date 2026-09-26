@@ -79,6 +79,13 @@ test('@performance input and search stay quick with eight and all currencies', a
   await page.getByRole('button', { name: /Add currency/ }).click();
   const pickerOpen = await page.evaluate(() => performance.getEntriesByName('fex:picker-open').at(-1).duration);
   expect(pickerOpen).toBeLessThan(100);
+  await page.evaluate(() => performance.clearMeasures('fex:picker-open'));
+  for (let index = 0; index < 10; index++) {
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /Add currency/ }).click();
+  }
+  const pickerReopen = await page.evaluate(() => performance.getEntriesByName('fex:picker-open').map(entry => entry.duration));
+  expect(p95(pickerReopen)).toBeLessThan(100);
   for (const search of ['dollar', 'eur', 'dong', 'pound', 'yen', 'd', 'do', 'dol', 'doll', '']) await page.getByRole('searchbox').fill(search);
   const filter = await page.evaluate(() => performance.getEntriesByName('fex:picker-search').map(entry => entry.duration));
   expect(p95(filter)).toBeLessThan(100);
@@ -93,5 +100,5 @@ test('@performance input and search stay quick with eight and all currencies', a
   expect(p95(large.inputs)).toBeLessThan(100);
   expect(large.longTasks.filter(duration => duration > 50).length).toBeLessThan(2);
   expect(calls.rates).toBe(before);
-  await reportMetrics({ testInfo, name: 'interaction-metrics', report: { cpuSlowdown: 4, defaultInputP95: p95(normal), pickerOpen, searchP95: p95(filter), fullCatalogCount: FALLBACK_CATALOG.length, fullCatalogInputP95: p95(large.inputs), longTasks: large.longTasks } });
+  await reportMetrics({ testInfo, name: 'interaction-metrics', report: { cpuSlowdown: 4, defaultInputP95: p95(normal), pickerOpen, pickerReopenP95: p95(pickerReopen), searchP95: p95(filter), fullCatalogCount: FALLBACK_CATALOG.length, fullCatalogInputP95: p95(large.inputs), longTasks: large.longTasks } });
 });

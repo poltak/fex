@@ -1,9 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRateController, fetchCatalog, fetchRates, validateCatalog, validateSnapshot } from '../src/data.js';
+import { createRateController, fetchCatalog, fetchRates, isFresh, validateCatalog, validateSnapshot } from '../src/data.js';
 const snapshot = (checkedAt = 100, date = '2026-09-25', rate = '0.9') => ({ base: 'USD', checkedAt, rates: { USD: { rate: '1', date }, EUR: { rate, date } } });
 const response = rows => ({ ok: true, json: async () => rows });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 afterEach(() => vi.useRealTimers());
+describe('cache freshness', () => {
+  it('uses the same bounded clock policy for hourly rates and daily catalogs', () => {
+    const now = 100000000;
+    for (const maxAge of [3600000, 86400000]) {
+      expect(isFresh({ checkedAt: now - maxAge + 1, maxAge, now })).toBe(true);
+      expect(isFresh({ checkedAt: now - maxAge, maxAge, now })).toBe(false);
+      expect(isFresh({ checkedAt: now + 300000, maxAge, now })).toBe(true);
+      expect(isFresh({ checkedAt: now + 86400000, maxAge, now })).toBe(false);
+    }
+  });
+});
 describe('API validation', () => {
   it('normalizes full catalogs and keeps units without symbols', async () => {
     expect(await fetchCatalog({ fetchImpl: vi.fn().mockResolvedValue(response([{ iso_code: 'USD', name: 'US Dollar', symbol: '$' }, { iso_code: 'XAU', name: 'Gold' }])) })).toEqual([{ code: 'USD', name: 'US Dollar', symbol: '$' }, { code: 'XAU', name: 'Gold', symbol: '' }]);

@@ -3,6 +3,12 @@
 /** @typedef {{base:'USD',rates:Record<string,Rate>,checkedAt:number}} Snapshot */
 const CODE = /^[A-Z]{3}$/;
 const HOUR = 3600000;
+const CLOCK_TOLERANCE = 300000;
+
+/** @param {{checkedAt:number,maxAge:number,now?:number}} options */
+export function isFresh({ checkedAt, maxAge, now = Date.now() }) {
+  return Number.isFinite(checkedAt) && checkedAt >= 0 && checkedAt <= now + CLOCK_TOLERANCE && now - checkedAt < maxAge;
+}
 function validDate(date) {
   return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date;
 }
@@ -80,7 +86,7 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
   /** @type {Snapshot|null} */ let pending = null;
   let inflight = null, abort = null, destroyed = false, failures = 0, cooldown = false;
   let status = { phase: 'loading', checkedAt: null, error: null, retryAt: null, pending: false };
-  const future = snapshot => snapshot && snapshot.checkedAt > now() + 300000;
+  const future = snapshot => snapshot && snapshot.checkedAt > now() + CLOCK_TOLERANCE;
   const emit = (patch = {}) => { status = { ...status, ...patch, checkedAt: displayed?.checkedAt ?? null, pending: !!pending }; if (!destroyed) onStatus({ ...status }); };
   const adopt = (snapshot, network = false) => {
     if (destroyed) return false;
@@ -106,7 +112,7 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
       if (!online) { emit({ phase: 'offline', error: null }); return Promise.resolve(); }
       if (inflight) return inflight;
       if (status.retryAt && now() < status.retryAt && (cooldown || !force)) return Promise.resolve();
-      if (!force && latest && !future(latest) && now() - latest.checkedAt < HOUR) { emit({ phase: 'ready' }); return Promise.resolve(); }
+      if (!force && latest && isFresh({ checkedAt: latest.checkedAt, maxAge: HOUR, now: now() })) { emit({ phase: 'ready' }); return Promise.resolve(); }
       abort = new AbortController();
       emit({ phase: displayed ? 'refreshing' : 'loading', error: null });
       inflight = (async () => {

@@ -195,3 +195,89 @@ test('keeps currency selection local and responds to another idle tab', async ({
   await page.reload();
   await expect(amount(page, 'USD')).toHaveValue('25.00');
 });
+
+test('Undo keeps a newer amount received from another tab', async ({ page, context }) => {
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  const other = await context.newPage(); await mockApi(other); await other.goto('/');
+  await expect(amount(other, 'VND')).toHaveValue('260,000');
+  await openManage(page);
+  await page.getByRole('button', { name: 'Remove EUR' }).click();
+  await expect(other.locator('.currency-card')).toHaveCount(7);
+  await amount(other, 'USD').fill('25');
+  await amount(other, 'USD').press('Enter');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(amount(page, 'USD')).toHaveValue('25.00');
+  await page.locator('#undo').click();
+  await expect(amount(page, 'USD')).toHaveValue('25.00');
+  await expect(amount(page, 'EUR')).toHaveValue('22.50');
+});
+
+test('typing updates values without rewriting unchanged card metadata', async ({ page }) => {
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await amount(page, 'USD').focus();
+  await page.evaluate(() => {
+    window.__cardMutations = [];
+    new MutationObserver(records => window.__cardMutations.push(...records.map(record => record.attributeName)))
+      .observe(document.querySelector('#currency-list'), { subtree: true, attributes: true });
+  });
+  await amount(page, 'USD').fill('12');
+  await expect(amount(page, 'EUR')).toHaveValue('10.80');
+  expect(await page.evaluate(() => window.__cardMutations)).toEqual([]);
+});
+
+test('a delayed catalog preserves picker focus and selected currencies', async ({ page }) => {
+  let sendCatalog;
+  const ready = new Promise(resolve => { sendCatalog = resolve; });
+  await page.route('https://api.frankfurter.dev/v2/currencies', async route => {
+    await ready;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(catalog.map(item => item.iso_code === 'JPY' ? { ...item, name: 'AAA Japanese Yen (updated)' } : item)) });
+  });
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await page.getByRole('button', { name: /Add currency/ }).click();
+  const yen = page.getByRole('checkbox', { name: /^Add JPY/ });
+  await yen.check();
+  await yen.focus();
+  sendCatalog();
+  await expect(page.getByText('AAA Japanese Yen (updated)', { exact: true })).toBeVisible();
+  await expect(yen).toBeFocused();
+  await expect(yen).toBeChecked();
+  await yen.evaluate(node => { window.__pickerYen = node; });
+  await page.locator('#picker-add').click();
+  await expect(amount(page, 'JPY')).toHaveValue('1,500');
+  await page.getByRole('button', { name: /Add currency/ }).click();
+  await expect(yen).toBeDisabled();
+  expect(await yen.evaluate(node => window.__pickerYen === node)).toBe(true);
+  await expect(page.locator('#picker-add')).toBeDisabled();
+});
+
+test('loads network rates when IndexedDB never responds', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => ({}) } });
+  });
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await expect(page.getByText('Changes may not be saved on this device.')).toBeVisible();
+  await amount(page, 'USD').fill('20');
+  await expect(amount(page, 'EUR')).toHaveValue('18.00');
+});
+
+test.describe('localized numbers', () => {
+  test.use({ locale: 'ar-EG-u-nu-arab' });
+  test('edits local digits and keeps the fraction in the same digit system', async ({ page }) => {
+    // macOS WebKit exposes only "ar" in navigator.language, losing the requested
+    // region and numbering system. Keep this test's locale deterministic.
+    await page.addInitScript(() => Object.defineProperty(navigator, 'language', { value: 'ar-EG-u-nu-arab' }));
+    await page.goto('/');
+    await expect(amount(page, 'USD')).toHaveValue('١٠٫٠٠');
+    await amount(page, 'USD').focus();
+    await expect(amount(page, 'USD')).toHaveValue('١٠');
+    await amount(page, 'USD').fill('١٢٫٥');
+    await expect(amount(page, 'EUR')).toHaveValue('١١٫٢٥');
+    await amount(page, 'USD').press('Enter');
+    await page.reload();
+    await expect(amount(page, 'USD')).toHaveValue('١٢٫٥٠');
+  });
+});

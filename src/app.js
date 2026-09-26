@@ -1,8 +1,9 @@
 import { createConverter, formatAmount, formatEditable, formatUnitRate, isOldRate, normalizeSearch, parseAmount, rateDates } from './domain.js';
-import { DEFAULT_AMOUNT, DEFAULT_CODES, DEFAULT_SOURCE, FALLBACK_CATALOG, OTHER_UNIT_CODES } from './catalog.js';
-import { createRateController, fetchCatalog, fetchRates } from './data.js';
+import { DEFAULT_AMOUNT, DEFAULT_CODES, DEFAULT_SOURCE, FALLBACK_CATALOG } from './catalog.js';
+import { createRateController, fetchCatalog, fetchRates, isFresh } from './data.js';
 import { createStorage } from './storage.js';
 import { createPwa } from './pwa/client.js';
+import { createCurrencyPicker } from './picker.js';
 
 /** @typedef {import('./data.js').Snapshot} Snapshot */
 /** @typedef {import('./storage.js').Preferences} Preferences */
@@ -36,9 +37,8 @@ let editing = false, inputError = '', inputDraft = '', draftInvalid = false;
 let saveTimer, toastTimer, heartbeat, pendingPreferences = null;
 let revision = 0, undoAction = null;
 const pickerSelection = new Set();
-/** @type {Map<string, {element:HTMLLabelElement,input:HTMLInputElement,note:HTMLElement,search:string,unit:string}>} */
-let pickerRows = new Map();
-let promotedOption = null;
+let pickerCatalog = null;
+const picker = createCurrencyPicker({ container: dom.pickerOptions, renderBadge: badge });
 let status = { phase: 'loading', checkedAt: null, error: null, retryAt: null, pending: false };
 let catalogCheckedAt = 0, catalogLoading = false, dragCode = '';
 let installAvailable = false;
@@ -64,13 +64,18 @@ function restoreDraft() {
   draftInvalid = parsed?.status === 'invalid' || parsed?.status === 'incomplete';
   inputError = parsed?.status === 'invalid' ? parsed.message : '';
 }
+function applyPreferences(value) {
+  preferences = value;
+  // Undo can restore a removed row, but must not replace a newer tab's amount.
+  revision++;
+  restoreDraft(); renderList(); renderStatus();
+}
 function applyPendingPreferences() {
   if (!pendingPreferences || editing || dom.manage.open || dom.picker.open) return false;
   const pending = pendingPreferences;
   pendingPreferences = null;
   if (pending.revision !== revision) { writePreferences(); return false; }
-  preferences = pending.value;
-  restoreDraft(); renderList(); renderStatus();
+  applyPreferences(pending.value);
   return true;
 }
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(writePreferences, 250); }
@@ -144,11 +149,15 @@ function renderAmounts() {
   for (const [code, row] of rows) {
     row.amount = amountFor(code);
     const source = code === preferences.source;
-    row.element.dataset.source = String(source);
-    row.input.setAttribute('aria-current', source ? 'true' : 'false');
-    row.input.setAttribute('aria-invalid', source && draftInvalid ? 'true' : 'false');
-    row.error.hidden = !source || !inputError;
-    row.error.textContent = source ? inputError : '';
+    if (row.element.dataset.source !== String(source)) {
+      row.element.dataset.source = String(source);
+      row.input.setAttribute('aria-current', String(source));
+    }
+    const invalid = String(source && draftInvalid);
+    if (row.input.getAttribute('aria-invalid') !== invalid) row.input.setAttribute('aria-invalid', invalid);
+    const error = source ? inputError : '';
+    if (row.error.hidden !== !error) row.error.hidden = !error;
+    if (row.error.textContent !== error) row.error.textContent = error;
     // Keep the editing node and its exact draft intact; never round-trip display text.
     if (editing && document.activeElement === row.input) continue;
     const value = source && draftInvalid ? inputDraft : row.amount === null ? '' : formatAmount({ amount: row.amount, currency: code, locale });
@@ -286,52 +295,15 @@ $('menu-rates').addEventListener('click', openAbout);
 dom.retry.addEventListener('click', () => { void refresh({ force: true }); });
 
 function buildPicker() {
-  pickerRows = new Map();
-  promotedOption = null;
-  const fragment = document.createDocumentFragment();
-  const ordered = [...catalog].sort((a, b) => Number(OTHER_UNIT_CODES.has(a.code)) - Number(OTHER_UNIT_CODES.has(b.code)) || a.name.localeCompare(b.name));
-  let inOther = false;
-  for (const item of ordered) {
-    if (OTHER_UNIT_CODES.has(item.code) && !inOther) {
-      const heading = document.createElement('p'); heading.className = 'picker-group'; heading.id = 'other-units-heading'; heading.textContent = 'Other supported units'; fragment.append(heading); inOther = true;
-    }
-    const element = document.createElement('label'); element.className = 'picker-option';
-    const mark = document.createElement('span'); mark.className = 'currency-badge'; mark.setAttribute('aria-hidden', 'true'); badge(mark, item.code);
-    const identity = document.createElement('span'); identity.className = 'identity-copy';
-    const code = document.createElement('span'); code.className = 'currency-code'; code.textContent = item.code;
-    const name = document.createElement('span'); name.className = 'currency-name'; name.textContent = item.name;
-    const note = document.createElement('span'); note.className = 'picker-note';
-    identity.append(code, name);
-    const input = document.createElement('input'); input.type = 'checkbox'; input.value = item.code; input.name = 'currency'; input.setAttribute('aria-label', `Add ${item.code}, ${item.name}`);
-    element.append(mark, identity, note, input); fragment.append(element);
-    pickerRows.set(item.code, { element, input, note, search: normalizeSearch(`${item.code} ${item.name} ${item.symbol}`), unit: OTHER_UNIT_CODES.has(item.code) ? item.symbol || 'Reference unit' : '' });
-  }
-  dom.pickerOptions.replaceChildren(fragment);
+  if (pickerCatalog === catalog) return;
+  picker.setCatalog(catalog);
+  pickerCatalog = catalog;
+  for (const code of pickerSelection) if (!catalogByCode.has(code)) pickerSelection.delete(code);
 }
 
 function filterPicker() {
   const search = normalizeSearch(dom.search.value);
-  if (promotedOption) {
-    dom.pickerOptions.insertBefore(promotedOption.element, promotedOption.next);
-    promotedOption = null;
-  }
-  let visible = 0, otherVisible = false;
-  for (const [code, row] of pickerRows) {
-    const added = preferences.codes.includes(code);
-    row.element.hidden = search !== '' && !row.search.includes(search);
-    row.element.dataset.added = String(added);
-    row.input.disabled = added;
-    row.input.checked = added || pickerSelection.has(code);
-    row.note.textContent = [row.unit, added ? 'Added' : snapshot && !snapshot.rates[code] ? 'Rate unavailable' : ''].filter(Boolean).join(' · ');
-    if (!row.element.hidden) { visible++; if (OTHER_UNIT_CODES.has(code)) otherVisible = true; }
-  }
-  // A precise code match appears first without rebuilding the native inputs.
-  const exact = pickerRows.get(search.toUpperCase());
-  if (exact && dom.pickerOptions.firstElementChild !== exact.element) {
-    promotedOption = { element: exact.element, next: exact.element.nextSibling };
-    dom.pickerOptions.prepend(exact.element);
-  }
-  const heading = $('other-units-heading'); if (heading) heading.hidden = !!search || !otherVisible;
+  const visible = picker.render({ search, codes: preferences.codes, selected: pickerSelection, rates: snapshot?.rates || null });
   $('search-clear').hidden = !search;
   dom.noCurrencies.hidden = visible !== 0;
   dom.pickerCount.textContent = `${visible} ${visible === 1 ? 'currency or unit' : 'currencies and units'}${!navigator.onLine ? ' · Saved list' : ''}`;
@@ -433,7 +405,7 @@ function setCatalog(items) {
 }
 
 async function updateCatalog() {
-  if (catalogLoading || !navigator.onLine || document.hidden || Date.now() - catalogCheckedAt < 86400000) return;
+  if (catalogLoading || !navigator.onLine || document.hidden || (catalogCheckedAt && isFresh({ checkedAt: catalogCheckedAt, maxAge: 86400000 }))) return;
   catalogLoading = true;
   try { const items = await fetchCatalog(); catalogCheckedAt = Date.now(); setCatalog(items); await storage.writeCatalog({ items, checkedAt: catalogCheckedAt }); }
   catch { /* The full bundled or saved catalog remains available. */ }
@@ -455,7 +427,7 @@ storage.subscribe(async event => {
   if (event.type === 'rates') rates.acceptSaved(await storage.readRates());
   if (event.type === 'preferences') {
     if (editing || dom.manage.open || dom.picker.open) pendingPreferences = { value: event.value, revision };
-    else { preferences = event.value; restoreDraft(); renderList(); renderStatus(); }
+    else applyPreferences(event.value);
   }
 });
 
