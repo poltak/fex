@@ -207,7 +207,7 @@ This screen has a small and well-defined state model. Native elements and focuse
 | Browser tests | Playwright | Exercise mobile layouts, storage, errors, and service-worker behavior. |
 | Hosting | GitHub Pages | Static publication from the public repository; a custom domain can be added later. |
 
-The only proposed production dependency is decimal.js-light for decimal arithmetic. It is not installed by this plan. Obtain confirmation before installing it, as required by the workspace rules. There will be no React, react-dom, virtual DOM, hydration step, UI component package, client router, or global state package. Build, PWA generation, type-check tooling, and tests are development dependencies. Account for generated service-worker code in the asset budget even though its generator is a development tool. Use npm and commit the lockfile when implementation work is authorized. Select compatible current stable versions at that point.
+The only proposed production dependency is decimal.js-light for decimal arithmetic. It is not installed by this plan. Obtain confirmation before installing it, as required by the workspace rules. There will be no React, react-dom, virtual DOM, hydration step, UI component package, client router, or global state package. Build, PWA generation, type-check tooling, and tests are development dependencies. Account for generated service-worker code in the asset budget even though its generator is a development tool. Use pnpm and commit the pnpm lockfile when implementation work is authorized. Select compatible current stable versions at that point.
 
 Vite is only the development and build tool. The published result is static HTML, CSS, JavaScript, and PWA assets. It can be served from a compatible static host. [Vite production builds](https://vite.dev/guide/build)
 
@@ -230,7 +230,7 @@ For an amount edit, parse the source once, prepare the common-base value once, a
 | tests | Unit, component, browser, and offline/update fixtures. |
 | Project documents | Setup, deployment, source terms, and maintenance instructions. |
 
-Expose clear npm scripts for development, build, JSDoc/JavaScript type checks, lint, unit tests, browser tests, and performance checks. Provide one combined check command for the complete release gate. Run browser and performance tests against the production build; a development server alone is not sufficient.
+Expose clear pnpm scripts for development, build, JSDoc/JavaScript type checks, lint, unit tests, browser tests, and performance checks. Provide one combined check command for the complete release gate. Run browser and performance tests against the production build; a development server alone is not sufficient.
 
 **Accessibility and mobile behavior are release requirements.**
 

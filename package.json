@@ -5,10 +5,11 @@
   "type": "module",
   "description": "A fast, private, offline-ready currency converter.",
   "engines": { "node": ">=22.22.2 <23 || >=24.15.0" },
+  "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "icons": "node scripts/icons.mjs",
-    "build": "npm run icons && vite build",
+    "build": "pnpm run icons && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -17,7 +18,7 @@
     "test:performance": "playwright test tests/browser/performance.spec.js --project=chromium --workers=1",
     "test:live": "node scripts/smoke-live.mjs",
     "check:size": "node scripts/check-size.mjs",
-    "check": "npm run typecheck && npm run lint && npm run test:unit && npm run build && npm run check:size && npm run test:browser && npm run test:performance"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run test:unit && pnpm run build && pnpm run check:size && pnpm run test:browser && pnpm run test:performance"
   },
   "dependencies": { "decimal.js-light": "2.5.1" },
   "devDependencies": {

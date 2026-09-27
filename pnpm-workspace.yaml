@@ -1,0 +1,3 @@
+# Preserve the existing resolution while pnpm's default one-day age gate applies.
+minimumReleaseAgeExclude:
+  - '@asamuzakjp/css-color@7.1.0'

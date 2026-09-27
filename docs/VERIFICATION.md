@@ -1,6 +1,16 @@
 # Local verification
 
-The latest `npm run check` includes the history chart. It passed type checks, lint, a production build, size checks, unit tests, browser tests, and performance tests. These local checks do not verify the deployed chart or physical phone performance. See [the review findings and fixes](CODE_REVIEW.md).
+## Current pnpm verification
+
+`pnpm install --frozen-lockfile` and `pnpm run check` passed. The check passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped because WebKit returned internal errors for offline reloads and new pages. Type checks, lint, the production build, and size checks passed.
+
+The root build measured 23.68 KiB gzip for initial JavaScript and 61.32 KiB for the complete offline installation. `FEX_BASE_PATH=/fex/ pnpm run build` and `pnpm run check:size` also passed. The `/fex/` build measured 23.69 KiB and 61.33 KiB.
+
+These local checks do not verify the deployed chart or physical phone performance. See [the review findings and fixes](CODE_REVIEW.md).
+
+## Historical npm verification
+
+Before the pnpm migration, `npm run check` passed type checks, lint, a production build, size checks, unit tests, browser tests, and performance tests. The historical run passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped. The old npm command names below record that earlier run. Use the pnpm commands above and in the README for new checks.
 
 ## Functional checks
 
@@ -23,7 +33,7 @@ Except for the current bundle-size and chart rows, these measurements are from a
 | Check | Measured | Target |
 | --- | ---: | ---: |
 | Initial JavaScript, gzip | 23.68 KiB | 25 KiB |
-| Page and offline installation, gzip | 61.33 KiB | 75 KiB |
+| Page and offline installation, gzip | 61.32 KiB | 75 KiB |
 | First contentful paint | 468 ms | 1,500 ms |
 | Controls ready | 577 ms | 2,000 ms |
 | Offline saved-rate restore, p95 of five loads | 77 ms | 500 ms |
@@ -40,11 +50,11 @@ The final chart sample recorded two historical requests. No long tasks were obse
 
 The same-machine converter sample before the review fixes measured 1.4 ms for the default input handler, 5.1 ms for all 166 codes, and 34.8 ms for first picker opening. Those figures remain regression references; the final feature check is the source for the bundle sizes and chart measurements shown above. These short samples have normal run-to-run variance; they do not establish a fixed percentage improvement. The DOM regression test separately confirms that valid typing no longer writes unchanged card attributes.
 
-Run `npm run test:performance` after a production build to repeat these checks. JSON measurements and phone/desktop screenshots are saved in `test-results/`. The phone list, full desktop list, and currency picker were inspected visually earlier. The final chart was also inspected at 320px and desktop widths; its full date axis remained visible.
+Run `pnpm run test:performance` after a production build to repeat these checks. JSON measurements and phone/desktop screenshots are saved in `test-results/`. The phone list, full desktop list, and currency picker were inspected visually earlier. The final chart was also inspected at 320px and desktop widths; its full date axis remained visible.
 
 ## Live data check
 
-`npm run test:live` passed for the catalog, latest USD table, and one-week USD/VND history. All three endpoints returned HTTP 200 with CORS `*`; the historical response contained eight points.
+Before the pnpm migration, `npm run test:live` passed for the catalog, latest USD table, and one-week USD/VND history. All three endpoints returned HTTP 200 with CORS `*`; the historical response contained eight points.
 
 The check sends only catalog, latest USD-table, and selected USD/VND history GET requests. It sends no amount. It validates response headers from Node; final-domain browser access is a separate release check. Live data checks are deliberately outside the deterministic test suite.
 

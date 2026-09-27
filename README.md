@@ -6,11 +6,11 @@ Edit any currency card to make it the source. Other cards update on the device. 
 
 ## Run locally
 
-Use Node.js 24.15 or later on the Node 24 line, or Node 22.22.2 or later on the Node 22 line. Use the committed npm lockfile.
+Use Node.js 24.15 or later on the Node 24 line, or Node 22.22.2 or later on the Node 22 line. Use pnpm 11.25.0, as pinned in `package.json`, and the committed pnpm lockfile.
 
 ```sh
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Open the URL printed by Vite. No API key or environment file is required. The development server does not register the production service worker.
@@ -18,27 +18,27 @@ Open the URL printed by Vite. No API key or environment file is required. The de
 ## Build and check
 
 ```sh
-npm exec -- playwright install --with-deps chromium firefox webkit
-npm run check
+pnpm exec playwright install --with-deps chromium firefox webkit
+pnpm run check
 ```
 
-The check runs JavaScript type checks, lint, unit tests, the production build, the bundle size gate, Playwright behavior tests in Chromium, Firefox, and WebKit, and a separate Chromium performance suite. Run `npm run test:performance` to repeat the performance suite by itself after a build. Browser tests use controlled API responses. They do not require current market values. On Linux, the browser installation command also installs the required system packages.
+The check runs JavaScript type checks, lint, unit tests, the production build, the bundle size gate, Playwright behavior tests in Chromium, Firefox, and WebKit, and a separate Chromium performance suite. Run `pnpm run test:performance` to repeat the performance suite by itself after a build. Browser tests use controlled API responses. They do not require current market values. On Linux, the browser installation command also installs the required system packages.
 
 To inspect a production build:
 
 ```sh
-npm run build
-npm run preview
+pnpm run build
+pnpm run preview
 ```
 
-Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `npm run check:size` after a build to check the limits of 25 KiB gzip for initial static JavaScript and 75 KiB gzip for the complete offline installation. The latter counts every unique service-worker precache asset once, plus the service worker. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
+Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `pnpm run check:size` after a build to check the limits of 25 KiB gzip for initial static JavaScript and 75 KiB gzip for the complete offline installation. The latter counts every unique service-worker precache asset once, plus the service worker. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
 
-The **Check and deploy** workflow runs the full check on pull requests and pushes to `main`. A manual run on any branch runs the check. Only a run on `main` reads Pages settings and can deploy. The workflow runs `npm run check` once. A main run then makes a separate build for the Pages base path. This build does not run the test suite again. A local check does not show that CI ran. CI requires a workflow run.
+The **Check and deploy** workflow runs the full check on pull requests and pushes to `main`. A manual run on any branch runs the check. Only a run on `main` reads Pages settings and can deploy. The workflow runs `pnpm run check` once. A main run then makes a separate build for the Pages base path. This build does not run the test suite again. A local check does not show that CI ran. CI requires a workflow run.
 
 Run the read-only live API check separately:
 
 ```sh
-npm run test:live
+pnpm run test:live
 ```
 
 Set `FEX_SMOKE_ORIGIN=https://your-domain.example` to inspect CORS response headers for a planned origin. The default is `https://example.com`. The check validates catalog, latest rates, a one-week USD/VND history response, initial-list coverage, dates, and CORS headers. It sends no amount. It is not part of the deterministic check and does not replace a request from the deployed browser.

@@ -28,8 +28,8 @@ No personal access token or Cloudflare secret is required; the workflow uses Git
 For a site at the domain root, such as `https://example.com/`:
 
 ```sh
-npm ci
-npm run check
+pnpm install --frozen-lockfile
+pnpm run check
 ```
 
 The default `FEX_BASE_PATH` is `/`. The build output is `dist/`.
@@ -37,14 +37,14 @@ The default `FEX_BASE_PATH` is `/`. The build output is `dist/`.
 For a site at `https://example.com/fex/`:
 
 ```sh
-FEX_BASE_PATH=/fex/ npm run build
-npm run check:size
-FEX_BASE_PATH=/fex/ npm run preview
+FEX_BASE_PATH=/fex/ pnpm run build
+pnpm run check:size
+FEX_BASE_PATH=/fex/ pnpm run preview
 ```
 
 Open `http://127.0.0.1:4173/fex/` for that preview. The base setting controls asset URLs, manifest ID, start URL, manifest scope, and service worker registration scope. The host must serve the contents of `dist/` at `/fex/`; setting the environment variable does not move files into a `fex` directory. On a host that serves a publication directory at `/`, place the built files under its `fex/` directory. For Cloudflare Pages, keep `_headers` at the publication root so Pages reads it. The file contains asset cache rules for both `/assets/` and `/fex/assets/`.
 
-The regular app behavior tests target the root path. The PWA suite runs separate root and `/fex/` cases for offline reopening and accepting a code update without losing a draft; these cases are included in `npm run test:browser`. Check the intended hosted subpath before release as well. Return to a root build after a manual subpath build before running the regular app tests. The full check also runs a dedicated Chromium performance suite after the behavior tests; repeat it with `npm run test:performance`. These browser checks do not establish physical installation behavior.
+The regular app behavior tests target the root path. The PWA suite runs separate root and `/fex/` cases for offline reopening and accepting a code update without losing a draft; these cases are included in `pnpm run test:browser`. Check the intended hosted subpath before release as well. Return to a root build after a manual subpath build before running the regular app tests. The full check also runs a dedicated Chromium performance suite after the behavior tests; repeat it with `pnpm run test:performance`. These browser checks do not establish physical installation behavior.
 
 `FEX_BUILD_ID` can identify a release. If it is not set, the build uses its timestamp. Use a new ID for each new deployment, including a rebuild of older source. Do not publish a build made for one base path under another path.
 
@@ -56,7 +56,7 @@ Choose the hosting account and project name before creating a project. A custom 
 
 For a local repository without a Git remote, [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) can publish the built static files through the dashboard or Wrangler. Select the validated `dist/` directory for a root deployment. Do not upload the repository, `node_modules`, or source configuration as the publication directory. A Direct Upload project cannot later switch to Git integration; that requires a new project.
 
-For Cloudflare Git integration, connect the intended remote. Use build command `npm run build`, output directory `dist`, and a Node version that satisfies `package.json`. Run the full check before promotion. The included Pages workflow deploys only to GitHub Pages; it contains no Cloudflare credentials or Cloudflare deployment step. Cloudflare is an optional alternative to the GitHub Pages setup above.
+For Cloudflare Git integration, connect the intended remote. Use build command `pnpm run build`, output directory `dist`, and a Node version that satisfies `package.json`. Run the full check before promotion. The included Pages workflow deploys only to GitHub Pages; it contains no Cloudflare credentials or Cloudflare deployment step. Cloudflare is an optional alternative to the GitHub Pages setup above.
 
 Do not put Cloudflare Access or another login in front of the final public app. Keep `public/_headers` in the build output. Verify the deployed content security policy, asset cache rules, HTTPS, service worker JavaScript MIME type, and manifest MIME type. `index.html`, `sw.js`, and other mutable files must revalidate; hashed files under `assets/` can have long cache lifetimes.
 
