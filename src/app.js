@@ -8,7 +8,7 @@ import { createCurrencyPicker } from './picker.js';
 /** @typedef {import('./data.js').Snapshot} Snapshot */
 /** @typedef {import('./storage.js').Preferences} Preferences */
 /** @typedef {{code:string,name:string,symbol:string}} Currency */
-/** @typedef {{element:HTMLElement,input:HTMLInputElement,badge:HTMLElement,code:HTMLElement,name:HTMLElement,unit:HTMLElement,error:HTMLElement,amount:string|null}} Row */
+/** @typedef {{element:HTMLElement,input:HTMLInputElement,badge:HTMLElement,code:HTMLElement,name:HTMLElement,unit:HTMLElement,error:HTMLElement,history:HTMLButtonElement,amount:string|null}} Row */
 
 const locale = navigator.language || 'en-US';
 const base = import.meta.env.BASE_URL;
@@ -16,6 +16,8 @@ const localBadges = new Set(DEFAULT_CODES);
 const $ = id => document.getElementById(id);
 const dom = {
   list: $('currency-list'), template: /** @type {HTMLTemplateElement} */ ($('card-template')),
+  convertScreen: $('convert-screen'), chartScreen: $('chart-screen'), convertTab: /** @type {HTMLButtonElement} */ ($('convert-tab')),
+  chartTab: /** @type {HTMLButtonElement} */ ($('chart-tab')), convertHeading: /** @type {HTMLElement} */ ($('convert-heading')),
   picker: /** @type {HTMLDialogElement} */ ($('picker')), manage: /** @type {HTMLDialogElement} */ ($('manage')),
   menu: /** @type {HTMLDialogElement} */ ($('menu')), about: /** @type {HTMLDialogElement} */ ($('about')),
   installHelp: /** @type {HTMLDialogElement} */ ($('install-help')),
@@ -42,6 +44,10 @@ const picker = createCurrencyPicker({ container: dom.pickerOptions, renderBadge:
 let status = { phase: 'loading', checkedAt: null, error: null, retryAt: null, pending: false };
 let catalogCheckedAt = 0, catalogLoading = false, dragCode = '';
 let installAvailable = false;
+const chartPeriods = new Set(['1W', '1M', '3M', '1Y', '5Y']);
+let chartSettings = null, chartSettingsLoaded = false, chartSettingsPromise = null, chartUi = null, chartModulePromise = null;
+let catalogRestorePromise = null;
+let lastRouteHash = null, converterScroll = 0, chartReturnFocus = null;
 const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function measure(name, action) {
@@ -119,11 +125,13 @@ function createRow(code) {
   identity.htmlFor = input.id;
   const row = /** @type {Row} */ ({
     element, input, badge: element.querySelector('.currency-badge'), code: element.querySelector('.currency-code'),
-    name: element.querySelector('.currency-name'), unit: element.querySelector('.unit-rate'), error: element.querySelector('.field-error'), amount: null,
+    name: element.querySelector('.currency-name'), unit: element.querySelector('.unit-rate'), error: element.querySelector('.field-error'),
+    history: element.querySelector('.history-link'), amount: null,
   });
   row.error.id = `error-${code}`;
   row.unit.id = `unit-${code}`;
   input.setAttribute('aria-describedby', `${row.unit.id} ${row.error.id}`);
+  row.history.addEventListener('click', () => { void openChartFromCard({ quote: code, opener: row.history }); });
   badge(row.badge, code);
   rows.set(code, row);
   return row;
@@ -169,6 +177,9 @@ function renderUnits() {
   for (const [code, row] of rows) {
     const source = code === preferences.source;
     row.unit.textContent = source ? snapshot && !snapshot.rates[code] ? 'Source rate unavailable' : 'You set the amount' : snapshot ? formatUnitRate({ source: preferences.source, target: code, rates: snapshot.rates, locale }) : 'Waiting for rates';
+    row.history.hidden = source;
+    row.history.dataset.historyQuote = code;
+    row.history.setAttribute('aria-label', `View ${preferences.source} to ${code} history`);
   }
 }
 
@@ -276,8 +287,213 @@ function showDialog({ dialog, opener = document.activeElement }) {
   dialogOpeners.set(dialog, opener);
   dialog.showModal();
 }
+
+function validChartSettings(value) {
+  if (!value || typeof value.base !== 'string' || typeof value.quote !== 'string' || value.base === value.quote || !catalogByCode.has(value.base) || !catalogByCode.has(value.quote) || !chartPeriods.has(value.period)) return null;
+  return { base: value.base, quote: value.quote, period: value.period };
+}
+
+function defaultChartSettings() {
+  const baseCode = catalogByCode.has(preferences.source) ? preferences.source : DEFAULT_SOURCE;
+  const quoteCode = preferences.codes.find(code => code !== baseCode && catalogByCode.has(code)) || catalog.find(item => item.code !== baseCode)?.code || 'VND';
+  return { base: baseCode, quote: quoteCode, period: '1M' };
+}
+
+function readChartSettings() {
+  if (chartSettingsLoaded) return Promise.resolve(chartSettings);
+  if (!chartSettingsPromise) chartSettingsPromise = (async () => {
+    try {
+      await restoreSavedCatalog();
+      chartSettings = validChartSettings(await storage.readChartSettings());
+    } catch { chartSettings = null; }
+    chartSettingsLoaded = true;
+    return chartSettings;
+  })();
+  return chartSettingsPromise;
+}
+
+function restoreSavedCatalog() {
+  if (!catalogRestorePromise) catalogRestorePromise = (async () => {
+    try {
+      const savedCatalog = await storage.readCatalog();
+      if (savedCatalog && savedCatalog.checkedAt > catalogCheckedAt) {
+        catalogCheckedAt = savedCatalog.checkedAt;
+        setCatalog(savedCatalog.items);
+      }
+    } catch {
+      catalogRestorePromise = null;
+      /* The bundled catalog remains available. */
+    }
+  })();
+  return catalogRestorePromise;
+}
+
+function chartLocation(settings) {
+  const query = new URLSearchParams({ base: settings.base, quote: settings.quote, period: settings.period });
+  return `${location.pathname}${location.search}#chart?${query}`;
+}
+
+function replaceChartLocation(settings) {
+  history.replaceState(null, '', chartLocation(settings));
+  lastRouteHash = location.hash;
+}
+
+function persistChartSettings(settings) {
+  const valid = validChartSettings(settings);
+  if (!valid) return;
+  chartSettings = valid;
+  chartSettingsLoaded = true;
+  chartSettingsPromise = null;
+  void storage.writeChartSettings(valid);
+  if (location.hash.startsWith('#chart')) replaceChartLocation(valid);
+}
+
+function measureChartOpen(start) {
+  performance.measure('fex:chart-open', { start, end: performance.now() });
+  const entries = performance.getEntriesByName('fex:chart-open');
+  if (entries.length > 100) performance.clearMeasures('fex:chart-open');
+}
+
+let navigationRevision = 0;
+let chartLoadFailed = false;
+async function getChartUi() {
+  if (!chartModulePromise) chartModulePromise = import('./chart.js').catch(error => { chartModulePromise = null; throw error; });
+  const { createChartScreen } = await chartModulePromise;
+  if (!chartUi) chartUi = createChartScreen({
+    storage, locale, renderBadge: badge, getCatalog: () => catalog,
+    onSelectionChange: persistChartSettings,
+  });
+  chartUi.setCatalog(catalog);
+  chartLoadFailed = false;
+  return chartUi;
+}
+
+function setScreen(screen, { focus = true, restoreScroll = true } = {}) {
+  const chart = screen === 'chart';
+  const leavingConvert = chart && !dom.convertScreen.hidden;
+  if (leavingConvert) converterScroll = window.scrollY;
+  dom.convertScreen.hidden = chart;
+  dom.chartScreen.hidden = !chart;
+  dom.convertTab.setAttribute('aria-pressed', String(!chart));
+  dom.chartTab.setAttribute('aria-pressed', String(chart));
+  if (leavingConvert) window.scrollTo({ top: 0, behavior: 'instant' });
+  if (!chart) {
+    chartUi?.close();
+    const focusRevision = navigationRevision;
+    if (focus) requestAnimationFrame(() => {
+      if (focusRevision !== navigationRevision || dom.convertScreen.hidden) return;
+      if (restoreScroll) window.scrollTo({ top: converterScroll, behavior: 'instant' });
+      const target = chartReturnFocus?.isConnected ? chartReturnFocus : dom.convertHeading;
+      target.focus({ preventScroll: true });
+      chartReturnFocus = null;
+    });
+  }
+}
+
+function chartSettingsFromHash(hash) {
+  if (!hash.startsWith('#chart')) return { chart: false, invalid: false, settings: null };
+  if (hash === '#chart') return { chart: true, invalid: false, settings: null };
+  if (!hash.startsWith('#chart?')) return { chart: true, invalid: true, settings: null };
+  const params = new URLSearchParams(hash.slice('#chart?'.length));
+  const candidate = { base: params.get('base'), quote: params.get('quote'), period: params.get('period') };
+  const settings = validChartSettings(candidate);
+  return { chart: true, invalid: !settings, settings };
+}
+
+function showChartLoadFailure() {
+  chartLoadFailed = true;
+  $('chart-content').setAttribute('aria-busy', 'false');
+  $('history-chart').setAttribute('hidden', '');
+  $('chart-empty').hidden = true;
+  $('chart-status').dataset.phase = 'error';
+  $('chart-status-primary').textContent = 'The chart could not be loaded.';
+  $('chart-status-secondary').textContent = navigator.onLine ? 'Try again to reload the chart.' : 'Connect to the internet, then try again.';
+  $('chart-retry').hidden = false;
+}
+
+async function showChart({ settings: requested = null, push = false, opener = null, normalizeInvalid = false, focus = true } = {}) {
+  const revisionNow = ++navigationRevision;
+  const chartOpenStart = performance.now();
+  if (opener instanceof HTMLElement) chartReturnFocus = opener;
+  setScreen('chart', { focus: false, restoreScroll: false });
+
+  const saved = await readChartSettings();
+  if (revisionNow !== navigationRevision) return;
+  let settings = validChartSettings(requested) || saved || defaultChartSettings();
+  if (normalizeInvalid && requested === null && saved) settings = { ...saved, period: '1M' };
+  if (push) history.pushState(null, '', chartLocation(settings));
+  else if (!location.hash.startsWith('#chart?')) replaceChartLocation(settings);
+  lastRouteHash = location.hash;
+  persistChartSettings(settings);
+
+  let ui;
+  try { ui = await getChartUi(); }
+  catch {
+    if (revisionNow === navigationRevision && !dom.chartScreen.hidden) showChartLoadFailure();
+    return;
+  }
+  if (revisionNow !== navigationRevision || location.hash && !location.hash.startsWith('#chart')) return;
+  ui.setCatalog(catalog);
+  const opening = ui.open({ ...settings, online: navigator.onLine });
+  if (focus) ui.focusHeading();
+  await opening;
+  if (revisionNow !== navigationRevision || dom.chartScreen.hidden) return;
+  measureChartOpen(chartOpenStart);
+}
+
+function showConvert({ push = false, focus = true } = {}) {
+  ++navigationRevision;
+  if (push) history.pushState(null, '', `${location.pathname}${location.search}`);
+  lastRouteHash = location.hash;
+  setScreen('convert', { focus, restoreScroll: true });
+}
+
+async function openChartFromCard({ quote, opener }) {
+  const revisionNow = ++navigationRevision;
+  const saved = chartSettings || await readChartSettings();
+  if (revisionNow !== navigationRevision || !(opener instanceof HTMLElement) || !opener.isConnected) return;
+  const settings = { base: preferences.source, quote, period: saved?.period || '1M' };
+  void showChart({ settings, push: true, opener });
+}
+
+async function applyLocation() {
+  const hash = location.hash;
+  if (hash === lastRouteHash) return;
+  const routeRevision = ++navigationRevision;
+  lastRouteHash = hash;
+  if (hash.startsWith('#chart')) {
+    await restoreSavedCatalog();
+    if (routeRevision !== navigationRevision || hash !== location.hash) return;
+  }
+  const route = chartSettingsFromHash(hash);
+  if (!route.chart) { showConvert(); return; }
+  const saved = await readChartSettings();
+  if (routeRevision !== navigationRevision || hash !== location.hash) return;
+  if (route.settings) { void showChart({ settings: route.settings, focus: true }); return; }
+  if (route.invalid) {
+    const fallback = saved ? { ...saved, period: '1M' } : defaultChartSettings();
+    void showChart({ settings: fallback, normalizeInvalid: true, focus: true });
+    return;
+  }
+  void showChart({ settings: saved || defaultChartSettings(), focus: true });
+}
+
+dom.convertTab.addEventListener('click', () => {
+  if (dom.convertScreen.hidden) showConvert({ push: true });
+});
+dom.chartTab.addEventListener('click', () => {
+  if (dom.chartScreen.hidden) void showChart({ push: true });
+});
+window.addEventListener('popstate', () => { lastRouteHash = null; void applyLocation(); });
+window.addEventListener('hashchange', () => { void applyLocation(); });
+$('chart-retry').addEventListener('click', () => {
+  if (!chartLoadFailed || dom.chartScreen.hidden) return;
+  chartLoadFailed = false;
+  void showChart({ settings: chartSettings || defaultChartSettings(), focus: true });
+});
+
 function openAbout(event) {
-  const opener = event.currentTarget === $('menu-rates') ? $('menu-open') : $('rates-open');
+  const opener = event.currentTarget === $('menu-rates') ? $('menu-open') : event.currentTarget;
   dom.menu.close(); renderDetails(); showDialog({ dialog: dom.about, opener });
 }
 for (const button of document.querySelectorAll('[data-close]')) button.addEventListener('click', () => /** @type {HTMLDialogElement} */ ($(/** @type {HTMLElement} */ (button).dataset.close)).close());
@@ -291,6 +507,7 @@ for (const dialog of document.querySelectorAll('dialog')) {
 }
 $('menu-open').addEventListener('click', () => showDialog({ dialog: dom.menu, opener: $('menu-open') }));
 $('rates-open').addEventListener('click', openAbout);
+$('chart-rates-open').addEventListener('click', openAbout);
 $('menu-rates').addEventListener('click', openAbout);
 dom.retry.addEventListener('click', () => { void refresh({ force: true }); });
 
@@ -401,6 +618,7 @@ function setCatalog(items) {
   for (const code of preferences.codes) if (!map.has(code)) map.set(code, catalogByCode.get(code) || { code, name: `${code} (saved currency)`, symbol: code });
   catalog = [...map.values()]; catalogByCode = map;
   renderList();
+  chartUi?.setCatalog(catalog);
   if (dom.picker.open) { buildPicker(); filterPicker(); }
 }
 
@@ -435,12 +653,16 @@ async function resume() {
   if (document.hidden) return;
   rates.acceptSaved(await storage.readRates());
   void refresh(); void updateCatalog();
+  if (!dom.chartScreen.hidden) void chartUi?.refresh({ online: navigator.onLine });
 }
 document.addEventListener('visibilitychange', resume);
 window.addEventListener('focus', resume);
-window.addEventListener('online', () => { void refresh(); void updateCatalog(); });
-window.addEventListener('offline', () => { void refresh(); renderStatus(); });
-window.addEventListener('pagehide', () => { writePreferences(); clearInterval(heartbeat); });
+window.addEventListener('online', () => {
+  void refresh(); void updateCatalog();
+  if (!dom.chartScreen.hidden) void chartUi?.refresh({ online: true });
+});
+window.addEventListener('offline', () => { void refresh(); renderStatus(); if (!dom.chartScreen.hidden) void chartUi?.refresh({ online: false }); });
+window.addEventListener('pagehide', () => { writePreferences(); clearInterval(heartbeat); chartUi?.close(); });
 window.addEventListener('pageshow', () => { startHeartbeat(); void resume(); });
 function startHeartbeat() {
   clearInterval(heartbeat);
@@ -453,9 +675,10 @@ void (async () => {
   await rates.restore();
   performance.mark('fex:saved-rates-ready');
   void refresh();
-  const savedCatalog = await storage.readCatalog();
-  if (savedCatalog && savedCatalog.checkedAt > catalogCheckedAt) { catalogCheckedAt = savedCatalog.checkedAt; setCatalog(savedCatalog.items); }
+  await restoreSavedCatalog();
   void updateCatalog();
 })();
 requestAnimationFrame(() => { void pwa.register(); });
 startHeartbeat();
+if (location.hash) void applyLocation();
+else lastRouteHash = '';

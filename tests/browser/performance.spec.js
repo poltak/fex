@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { amount, mockApi } from './fixtures.js';
+import { amount, historyRows, mockApi } from './fixtures.js';
 import { FALLBACK_CATALOG } from '../../src/catalog.js';
 import { writeFile } from 'node:fs/promises';
 
@@ -101,4 +101,41 @@ test('@performance input and search stay quick with eight and all currencies', a
   expect(large.longTasks.filter(duration => duration > 50).length).toBeLessThan(2);
   expect(calls.rates).toBe(before);
   await reportMetrics({ testInfo, name: 'interaction-metrics', report: { cpuSlowdown: 4, defaultInputP95: p95(normal), pickerOpen, pickerReopenP95: p95(pickerReopen), searchP95: p95(filter), fullCatalogCount: FALLBACK_CATALOG.length, fullCatalogInputP95: p95(large.inputs), longTasks: large.longTasks } });
+});
+
+test('@performance cached chart opening and five-year rendering stay under 100 ms', async ({ page }, testInfo) => {
+  const calls = await mockApi(page, { historyForRequest: request => historyRows({ ...request, pointCount: 1827 }) });
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await page.locator('#chart-tab').click();
+  await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'ready');
+  const rendersBeforeFiveYears = await page.evaluate(() => performance.getEntriesByName('fex:chart-render').length);
+  await page.locator('[data-chart-period="5Y"]').click();
+  await expect.poll(() => calls.history).toBe(2);
+  await expect.poll(() => calls.historyReplies).toBe(2);
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByName('fex:chart-render').length)).toBeGreaterThan(rendersBeforeFiveYears);
+  await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'ready');
+
+  const fiveYearRender = await page.evaluate(() => performance.getEntriesByName('fex:chart-render').at(-1)?.duration);
+  expect(fiveYearRender).toBeDefined();
+  expect(fiveYearRender).toBeLessThan(100);
+
+  const cachedRendersBefore = await page.evaluate(() => performance.getEntriesByName('fex:chart-render').length);
+  const cachedOpensBefore = await page.evaluate(() => performance.getEntriesByName('fex:chart-open').length);
+  await page.locator('#convert-tab').click();
+  await page.locator('#chart-tab').click();
+  await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'ready');
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByName('fex:chart-render').length)).toBeGreaterThan(cachedRendersBefore);
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByName('fex:chart-open').length)).toBeGreaterThan(cachedOpensBefore);
+  const cachedOpen = await page.evaluate(() => performance.getEntriesByName('fex:chart-open').at(-1)?.duration);
+  expect(cachedOpen).toBeDefined();
+  expect(cachedOpen).toBeLessThan(100);
+  expect(calls.history).toBe(2);
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.screenshot({ path: testInfo.outputPath('fex-chart-mobile-320.png'), fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.screenshot({ path: testInfo.outputPath('fex-chart-desktop.png'), fullPage: true });
+  await reportMetrics({ testInfo, name: 'chart-metrics', report: { fiveYearPoints: 1827, fiveYearRender, cachedOpen, historyRequests: calls.history } });
 });

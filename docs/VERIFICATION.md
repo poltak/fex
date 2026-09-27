@@ -1,29 +1,29 @@
 # Local verification
 
-Updated after the code review on 26 September 2026, on macOS with Node 26.10.0 and Playwright 1.63.0. This record describes local checks. It does not establish a deployed site's behavior or physical phone performance. See [the review findings and fixes](CODE_REVIEW.md).
+The latest `npm run check` includes the history chart. It passed type checks, lint, a production build, size checks, unit tests, browser tests, and performance tests. These local checks do not verify the deployed chart or physical phone performance. See [the review findings and fixes](CODE_REVIEW.md).
 
 ## Functional checks
 
-`npm run check` passed type checks, lint, 92 unit tests, a production build, compressed size checks, browser tests, and performance checks. The functional browser suite has 64 passing cases and two explicit WebKit offline-navigation skips. Both performance cases pass.
+`npm run check` exited with code 0. It passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped because WebKit returns an internal error for offline reloads and new pages. Type checks, lint, production build, and size checks also passed.
 
-The browser checks cover conversion from any row, retained precision, empty/zero/incomplete/invalid input, cursor preservation, the complete picker, list order and removal, Undo, saved choices, errors and retry, refresh timing, editing during refresh, cross-tab changes, and keyboard focus. No request is made when an amount changes.
+The browser checks cover conversion from any row, retained precision, empty/zero/incomplete/invalid input, cursor preservation, the complete picker, list order and removal, Undo, saved choices, errors and retry, refresh timing, editing during refresh, cross-tab changes, and keyboard focus. No request is made when an amount changes. Chart checks cover on-demand period requests and cache reuse, pair selection, deep links and browser history, converter draft and scroll preservation, racing requests, keyboard and pointer selection, empty/one-point/flat/error/offline states, saved history, reconnect refresh, responsive phone and desktop layout, SVG axis labels, and delayed saved-catalog restoration.
 
 The review added regressions for stalled browser storage, localized digits, Undo after a newer cross-tab amount, unchanged card metadata during typing, and picker focus and node reuse across catalog updates and reopening. These cases pass in Chromium, Firefox, and WebKit. Unit tests also cover storage deadlines, late connections, locale-specific grouping, and clock tolerance for rates and catalogs.
 
 Real service worker checks use temporary builds with distinct JavaScript hashes and the production content security policy. They cover `/` and `/fex/`, updates, rollback, saved drafts, two-tab cache retention, cleanup after the old tab closes, and `Vary: Origin` cache matching. They also check that missing routes are not replaced with the app and that API responses are not put in the shell cache. The `/fex/` server sends no custom security headers; tests verify that the generated HTML CSP blocks inline scripts, as needed for GitHub Pages.
 
-Chromium and Firefox pass offline reopening. WebKit passes the online lifecycle cases, but its offline navigation returns an internal error for reloads, new pages, and a persistent profile. Its two offline-specific cases are marked skipped. Safari/iOS offline launch needs a physical-device check; it is not claimed as verified.
+Chromium and Firefox pass offline reopening. WebKit passes the online lifecycle cases, but its offline navigation returns an internal error for reloads and new pages. The three WebKit offline-specific checks are marked skipped. Safari/iOS offline launch needs a physical-device check; it is not claimed as verified.
 
 A first-install regression test starts with another app's worker controlling the wider origin. Fex must not show an update prompt unless its own registration has an active worker and a waiting update. This test failed before the fix and passes on all three engines. Another test checks that an old tab clears its update notice when a different tab accepts the update, without forcing the old tab to reload.
 
 ## Performance sample
 
-Profile: Chromium, 390 × 844 viewport, four-times CPU slowdown. Cold load uses 1.6 Mbps throughput and 150 ms latency. API responses use fixtures. Warm load uses the actual offline service worker and saved rates. These are lab measurements on the development machine, not phone guarantees.
+Except for the current bundle-size and chart rows, these measurements are from an earlier Chromium 390 × 844 profile with four-times CPU slowdown; cold-load API fixtures used 1.6 Mbps throughput and 150 ms latency. The chart rows are from the final local Chromium run with the module and data cached, without CPU or network throttling. These are lab results, not phone guarantees.
 
 | Check | Measured | Target |
 | --- | ---: | ---: |
-| Initial JavaScript, gzip | 19.68 KiB | 25 KiB |
-| Page and offline installation, gzip | 49.49 KiB | 75 KiB |
+| Initial JavaScript, gzip | 23.68 KiB | 25 KiB |
+| Page and offline installation, gzip | 61.33 KiB | 75 KiB |
 | First contentful paint | 468 ms | 1,500 ms |
 | Controls ready | 577 ms | 2,000 ms |
 | Offline saved-rate restore, p95 of five loads | 77 ms | 500 ms |
@@ -32,19 +32,21 @@ Profile: Chromium, 390 × 844 viewport, four-times CPU slowdown. Cold load uses 
 | Picker first opening | 28.8 ms | 100 ms |
 | Picker reopening, p95 of ten opens | 18.9 ms | 100 ms |
 | Search handler, p95 | 2.3 ms | 100 ms |
+| Cached chart opening, after module and data are ready | 8.8 ms | 100 ms |
+| Five-year chart rendering, after data is ready | 1.2 ms for 1,827 points | 100 ms |
 | Cold-load layout shift | 0.00027 | 0.05 |
 
-No long tasks were observed during the full-list input sample. Handler measurements include calculations and DOM writes; they are not field INP measurements. The first-load shell reserves card space to avoid shifting the footer when JavaScript starts.
+The final chart sample recorded two historical requests. No long tasks were observed during the full-list input sample. Handler measurements include calculations and DOM writes; they are not field INP measurements. The first-load shell reserves card space to avoid shifting the footer when JavaScript starts.
 
-The same-machine sample before the review fixes measured 1.4 ms for the default input handler, 5.1 ms for all 166 codes, and 34.8 ms for first picker opening. The final sample is shown above. These short samples have normal run-to-run variance; they do not establish a fixed percentage improvement. The DOM regression test separately confirms that valid typing no longer writes unchanged card attributes.
+The same-machine converter sample before the review fixes measured 1.4 ms for the default input handler, 5.1 ms for all 166 codes, and 34.8 ms for first picker opening. Those figures remain regression references; the final feature check is the source for the bundle sizes and chart measurements shown above. These short samples have normal run-to-run variance; they do not establish a fixed percentage improvement. The DOM regression test separately confirms that valid typing no longer writes unchanged card attributes.
 
-Run `npm run test:performance` after a production build to repeat these checks. JSON measurements and phone/desktop screenshots are saved in `test-results/`. The phone list, full desktop list, and currency picker were also inspected visually.
+Run `npm run test:performance` after a production build to repeat these checks. JSON measurements and phone/desktop screenshots are saved in `test-results/`. The phone list, full desktop list, and currency picker were inspected visually earlier. The final chart was also inspected at 320px and desktop widths; its full date axis remained visible.
 
 ## Live data check
 
-`npm run test:live` passed at 2026-09-26 15:48:53 UTC. Both Frankfurter endpoints returned HTTP 200 with CORS `*`. The catalog contained 166 codes; the normalized table contained 166 rates including the USD identity. All eight default currencies were covered. Rate dates ranged from 24 to 26 September 2026.
+`npm run test:live` passed for the catalog, latest USD table, and one-week USD/VND history. All three endpoints returned HTTP 200 with CORS `*`; the historical response contained eight points.
 
-The check sends only catalog and general USD-table requests, with no amount. It validates response headers from Node; final-domain browser access is a separate release check. Live data checks are deliberately outside the deterministic test suite.
+The check sends only catalog, latest USD-table, and selected USD/VND history GET requests. It sends no amount. It validates response headers from Node; final-domain browser access is a separate release check. Live data checks are deliberately outside the deterministic test suite.
 
 ## GitHub Pages verification
 

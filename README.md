@@ -1,8 +1,8 @@
 # Fex
 
-Fex is a public currency converter built with plain HTML, CSS, and JavaScript. It has no account system or app server. It uses one small runtime library, `decimal.js-light`, for decimal arithmetic. Vite builds the static site and its PWA assets.
+Fex is a public currency converter with Convert and Currency history screens. It uses plain HTML, CSS, and JavaScript, has no account system or app server, and uses `decimal.js-light` for decimal arithmetic. Vite builds the static site and its PWA assets.
 
-Edit any currency card to make it the source. Other cards update on the device. Add currencies from the current Frankfurter catalog, change their order, and save the list in the browser. The initial list is VND, USD, EUR, SGD, AUD, THB, GBP, and IDR, with USD 10 as the source.
+Edit any currency card to make it the source. Other cards update on the device. Add currencies from the current Frankfurter catalog, change their order, and save the list in the browser. Open Currency history from the navigation or a currency card to chart one pair. The initial list is VND, USD, EUR, SGD, AUD, THB, GBP, and IDR, with USD 10 as the source.
 
 ## Run locally
 
@@ -31,7 +31,7 @@ npm run build
 npm run preview
 ```
 
-Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `npm run check:size` after a build to check the limits of 25 KiB gzip for initial JavaScript and 75 KiB compressed for the page and offline installation together. The report lists the service worker separately. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
+Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `npm run check:size` after a build to check the limits of 25 KiB gzip for initial static JavaScript and 75 KiB gzip for the complete offline installation. The latter counts every unique service-worker precache asset once, plus the service worker. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
 
 The **Check and deploy** workflow runs the full check on pull requests and pushes to `main`. A manual run on any branch runs the check. Only a run on `main` reads Pages settings and can deploy. The workflow runs `npm run check` once. A main run then makes a separate build for the Pages base path. This build does not run the test suite again. A local check does not show that CI ran. CI requires a workflow run.
 
@@ -41,7 +41,7 @@ Run the read-only live API check separately:
 npm run test:live
 ```
 
-Set `FEX_SMOKE_ORIGIN=https://your-domain.example` to inspect CORS response headers for a planned origin. The default is `https://example.com`. The check validates catalog and rate schemas, initial-list coverage, dates, and CORS headers. It sends no amount. It is not part of the deterministic check and does not replace a request from the deployed browser.
+Set `FEX_SMOKE_ORIGIN=https://your-domain.example` to inspect CORS response headers for a planned origin. The default is `https://example.com`. The check validates catalog, latest rates, a one-week USD/VND history response, initial-list coverage, dates, and CORS headers. It sends no amount. It is not part of the deterministic check and does not replace a request from the deployed browser.
 
 ## GitHub Pages
 
@@ -51,14 +51,15 @@ If Pages is still disabled, a run on `main` builds for `/fex/` and explains the 
 
 ## Data and privacy
 
-The browser requests the full current currency catalog and the latest USD rate table from Frankfurter. It does not send entered amounts or the selected currency list. Conversion, parsing, formatting, and source changes run locally. The host and API provider can still receive normal request metadata, such as an IP address. The app has no analytics integration.
+The browser requests the current currency catalog and latest USD rate table from Frankfurter. It requests historical rates only when Currency history opens or the selected pair or period changes. Requests contain a currency pair and dates, never an entered amount or the converter's selected list. Conversion, parsing, formatting, and source changes run locally. The host and API provider can still receive normal request metadata, such as an IP address. The app has no analytics integration.
 
 The bundled catalog contains 166 codes from the official endpoint, recorded on 26 September 2026. That is a fallback snapshot, not a permanent limit on the live catalog. Rates are not bundled. A new offline visit cannot calculate conversions without saved rates. See [data sources and rate dates](docs/DATA_SOURCES.md).
 
 | Browser storage | Name | Content |
 | --- | --- | --- |
 | localStorage | `fex:preferences:v1` | Ordered codes, source, canonical amount, and an optional raw invalid or incomplete draft. |
-| IndexedDB | Database `fex-cache`, version 1; store `cache`; keys `rates` and `catalog` | Validated rate snapshot and currency metadata, each with its last check time. |
+| IndexedDB | Database `fex-cache`, version 1; store `cache`; keys `rates`, `catalog`, and `history:v1:<base>:<quote>:<from>:<to>` | Validated current rates, currency metadata, and bounded historical series with their check times. |
+| localStorage | `fex:chart-settings:v1` | Last selected history pair and period, separate from converter preferences. |
 | BroadcastChannel | `fex:cache:v1` | Notices that another tab saved rates; no amount payload. |
 | Cache Storage | `fex-shell:<scope pathname>:<build ID>` | Static assets for that app build and scope. |
 
@@ -66,7 +67,7 @@ Saved records have schema versions. Invalid records are ignored. If storage fail
 
 ## Offline use, installation, and updates
 
-Open a production build online first so it can save the app shell and rates. Saved conversions then work offline. The catalog can remain visible without a rate; that currency stays unavailable until a valid rate arrives. Clearing browser data removes offline data. A browser can also remove stored data when space is limited.
+Open a production build online first so it can save the app shell and rates. Saved conversions then work offline. Historical periods that were loaded and saved can also open offline; a period with no saved coverage needs a connection. The catalog can remain visible without a rate; that currency stays unavailable until a valid rate arrives. Clearing browser data removes offline data. A browser can also remove stored data when space is limited.
 
 Installation uses the browser's PWA support. Where the browser supplies an install prompt, use the app's Install control. On iPhone, use Safari's Share menu and Add to Home Screen. Installation needs a secure origin, except for local development allowances. Availability depends on the browser.
 
@@ -79,6 +80,8 @@ The PWA browser suite checks root and `/fex/` builds in separate cases. Chromium
 | File | Responsibility |
 | --- | --- |
 | `src/app.js` | Cards, picker, input events, and app lifecycle. |
+| `src/chart.js` | History screen, pair controls, chart rendering, and point selection. |
+| `src/history.js`, `src/history-data.js` | Date ranges, history validation, requests, and cached series. |
 | `src/domain.js` | Decimal conversion, parsing, formatting, and rate dates. |
 | `src/data.js` | API validation, refresh timing, retries, and pending rate updates. |
 | `src/storage.js` | Preferences, IndexedDB, and notices between tabs. |

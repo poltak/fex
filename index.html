@@ -36,9 +36,15 @@
         <button id="menu-open" class="icon-button" aria-label="Open app menu" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#icon-more" /></svg></button>
       </header>
 
+      <nav class="screen-nav" aria-label="Primary">
+        <button id="convert-tab" type="button" aria-pressed="true">Convert</button>
+        <button id="chart-tab" type="button" aria-pressed="false">Chart</button>
+      </nav>
+
       <main>
+        <section id="convert-screen" aria-labelledby="convert-heading">
         <div class="list-heading">
-          <div><p class="eyebrow">CURRENCY, SIMPLY</p><h1>Your currencies<span id="currency-count" class="count">8</span></h1></div>
+          <div><p class="eyebrow">CURRENCY, SIMPLY</p><h1 id="convert-heading" tabindex="-1">Your currencies<span id="currency-count" class="count">8</span></h1></div>
           <button id="add-open" class="button add-button" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#icon-plus" /></svg><span>Add<span class="wide-label"> currency</span></span></button>
         </div>
         <p class="intro">Edit any amount. Everything else follows.</p>
@@ -51,6 +57,61 @@
           <button id="retry" class="text-button" hidden>Retry</button>
         </div>
         <footer class="app-footer"><span>Small app. Wide world.</span><button id="rates-open" class="text-button">About the rates <span aria-hidden="true">↗</span></button></footer>
+        </section>
+
+        <section id="chart-screen" aria-labelledby="chart-heading" hidden>
+          <div class="chart-heading">
+            <div><p class="eyebrow">CURRENCY, SIMPLY</p><h1 id="chart-heading" tabindex="-1">Currency history</h1></div>
+          </div>
+          <div class="chart-pair" aria-label="Currency pair">
+            <button id="chart-base" class="chart-currency" type="button" aria-label="Choose base currency">
+              <span class="chart-currency-code">USD</span><span class="chart-currency-name">United States Dollar</span>
+            </button>
+            <button id="chart-swap" class="icon-button chart-swap" type="button" aria-label="Swap currencies"><svg class="icon" aria-hidden="true"><use href="#icon-arrows" /></svg></button>
+            <button id="chart-quote" class="chart-currency" type="button" aria-label="Choose quote currency">
+              <span class="chart-currency-code">VND</span><span class="chart-currency-name">Vietnamese Đồng</span>
+            </button>
+          </div>
+
+          <div class="chart-summary" aria-live="off">
+            <p id="chart-rate" class="chart-rate">—</p>
+            <p id="chart-rate-date" class="chart-rate-date"></p>
+            <p id="chart-change" class="chart-change">Waiting for history</p>
+          </div>
+
+          <div id="chart-periods" class="chart-periods" role="group" aria-label="History period">
+            <button type="button" data-chart-period="1W" aria-pressed="false">1W</button>
+            <button type="button" data-chart-period="1M" aria-pressed="true">1M</button>
+            <button type="button" data-chart-period="3M" aria-pressed="false">3M</button>
+            <button type="button" data-chart-period="1Y" aria-pressed="false">1Y</button>
+            <button type="button" data-chart-period="5Y" aria-pressed="false">5Y</button>
+          </div>
+
+          <div id="chart-content" class="chart-content" aria-busy="false">
+            <div id="chart-plot" class="chart-plot">
+              <p id="chart-empty" class="chart-empty" hidden></p>
+              <svg id="history-chart" class="history-chart" role="img" aria-labelledby="history-chart-title history-chart-description" tabindex="0" viewBox="0 0 640 280" preserveAspectRatio="none" data-chart-point="" hidden>
+                <title id="history-chart-title">Currency history chart</title>
+                <desc id="history-chart-description">Daily exchange rate observations. Use the left and right arrow keys to inspect each point.</desc>
+                <g class="chart-grid" aria-hidden="true"></g>
+                <path class="chart-line" aria-hidden="true"></path>
+                <g class="chart-markers" aria-hidden="true"></g>
+                <g class="chart-selection" aria-hidden="true"></g>
+                <g class="chart-labels" aria-hidden="true"></g>
+              </svg>
+            </div>
+            <p id="chart-point-readout" class="chart-point-readout" hidden></p>
+            <p id="chart-selection-announcer" class="sr-only" aria-live="polite"></p>
+          </div>
+
+          <div id="chart-status" class="chart-status" data-phase="idle" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-copy"><p id="chart-status-primary">Choose a period to view its history.</p><p id="chart-status-secondary" class="muted">Daily reference rates from Frankfurter</p></div>
+            <button id="chart-retry" class="text-button" type="button" hidden>Retry</button>
+          </div>
+          <p id="chart-range" class="chart-range"></p>
+          <p class="chart-source">Daily reference rates from <a href="https://frankfurter.dev/" target="_blank" rel="noopener noreferrer">Frankfurter</a>. <button id="chart-rates-open" class="text-button" type="button">About the rates</button></p>
+        </section>
       </main>
     </div>
 
@@ -60,10 +121,19 @@
           <label class="currency-identity"><span class="currency-badge" aria-hidden="true"></span><span class="identity-copy"><span class="currency-code"></span><span class="currency-name"></span></span></label>
           <input class="amount" type="text" inputmode="decimal" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="—" />
         </div>
-        <div class="card-bottom"><span class="source-label">Source</span><span class="unit-rate"></span></div>
+        <div class="card-bottom"><span class="source-label">Source</span><span class="unit-rate"></span><button class="history-link" type="button" hidden>View history</button></div>
         <p class="field-error" hidden></p>
       </article>
     </template>
+
+    <dialog id="chart-picker" class="dialog picker-dialog" aria-labelledby="chart-picker-title">
+      <div class="dialog-header"><div><p class="eyebrow">A WIDER VIEW</p><h2 id="chart-picker-title">Choose currency</h2></div><button class="icon-button" data-close="chart-picker" aria-label="Close chart currency picker"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <div class="search-field"><svg class="icon" aria-hidden="true"><use href="#icon-search" /></svg><input id="chart-currency-search" type="search" placeholder="Search name or code" aria-label="Search chart currencies" autocomplete="off" /><button id="chart-search-clear" class="icon-button" aria-label="Clear search" hidden><svg class="icon small" aria-hidden="true"><use href="#icon-close" /></svg></button></div>
+      <p id="chart-picker-count" class="dialog-hint"></p>
+      <div id="chart-picker-options" class="picker-options" role="radiogroup" aria-label="Chart currency"></div>
+      <p id="chart-picker-empty" class="empty-state" hidden>No currencies found. Try a name or a three-letter code.</p>
+      <div class="dialog-actions"><button class="button secondary" data-close="chart-picker">Cancel</button></div>
+    </dialog>
 
     <dialog id="picker" class="dialog picker-dialog" aria-labelledby="picker-title">
       <div class="dialog-header"><div><p class="eyebrow">A WIDER VIEW</p><h2 id="picker-title">Add currencies</h2></div><button class="icon-button" data-close="picker" aria-label="Close currency picker"><svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg></button></div>

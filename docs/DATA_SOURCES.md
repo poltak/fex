@@ -8,10 +8,11 @@ Fex uses [Frankfurter v2](https://frankfurter.dev/) for reference exchange rates
 | --- | --- |
 | Current currency catalog | [Currency metadata](https://api.frankfurter.dev/v2/currencies) |
 | Latest USD reference table | [USD rates](https://api.frankfurter.dev/v2/rates?base=USD) |
+| Historical pair for a selected period | `GET /v2/rates?base=USD&quotes=VND&from=YYYY-MM-DD&to=YYYY-MM-DD` |
 
-These are direct browser GET requests. Entered amounts are not request parameters. Typing and changing the source do not request a conversion from the service.
+These are direct browser GET requests. The historical request uses the chosen base, quote, and inclusive UTC date bounds. It returns daily observations that exist in the provider's data; it does not add missing dates or represent intraday prices. The converter does not request history at startup or when the user edits an amount. The chart requests only its selected pair and period. No entered amount or converter currency list is sent.
 
-Run `node scripts/smoke-live.mjs` for a read-only live schema and coverage check. It uses the production validators and prints catalog and rate counts, the supported initial list, the rate-date span, and CORS response headers. `FEX_SMOKE_ORIGIN` changes the request's Origin header. This Node check does not establish that a final deployed browser can connect. It remains separate from the deterministic unit, behavior, and performance suites.
+Run `node scripts/smoke-live.mjs` for a read-only live schema and coverage check. It uses the production validators and prints catalog and rate counts, the supported initial list, a one-week historical pair check, the rate-date span, and CORS response headers. `FEX_SMOKE_ORIGIN` changes the request's Origin header. This Node check does not establish that a final deployed browser can connect. It remains separate from the deterministic unit, behavior, and performance suites.
 
 The fallback catalog in `src/catalog.js` contains 166 current codes, recorded from the official currency endpoint on 26 September 2026. It contains names and symbols, not exchange rates. The app uses saved or fetched metadata when available and checks for new metadata after 24 hours during normal use. The current provider catalog can grow or change. It includes some metals and other units as well as currencies. Fex groups these as Other units. A catalog entry with no current usable rate remains visible but cannot produce a conversion.
 
@@ -28,6 +29,8 @@ Fex uses decimal arithmetic and keeps the internal source value separate from th
 Each currency rate retains its own provider date. Cross rates can therefore use two different dates. The rate details show the relevant dates; for a USD conversion, the other currency's date is the meaningful date. The synthetic USD identity date is not evidence of a separate market update. A displayed date range is not a claim that every currency has a quote from the same instant.
 
 The last check time records when Fex obtained a valid snapshot. It is separate from the rate dates. An unchanged response can advance the check time without changing the rate dates. Weekends, holidays, source schedules, and delayed publications can leave dates unchanged. Missing values are unavailable, not zero. Old rates retain their dates and can trigger a notice; fetching them again does not make them new.
+
+The history chart uses Frankfurter's same rates endpoint with `quotes`, `from`, and `to` parameters. Each result is the value of one unit of the selected base in the selected quote currency. The chart's latest value and percentage change come from that historical response, because its observation dates can differ from the current USD table. The app keeps historical records in a separate, bounded cache. It reuses saved coverage for smaller periods and can show saved periods offline; a period that has not been saved needs a connection.
 
 ## Refresh and offline behavior
 

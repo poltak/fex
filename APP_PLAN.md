@@ -4,9 +4,15 @@ This is the accepted implementation plan, prepared on 26 September 2026. The use
 
 Implementation is complete. The user selected `git@github.com:poltak/fex.git` as the remote and requested GitHub Pages support, with Pages enablement left to them. See [verification](docs/VERIFICATION.md) and [deployment](docs/DEPLOYMENT.md) for the current result and release steps.
 
-The main product decisions are set: use plain HTML, CSS, and JavaScript; make startup and interaction speed release requirements; use Frankfurter v2; require no account; show an editable list of currencies; support the full current currency catalog; save each visitor's choices on their device; and refresh rates automatically. The screenshot is the reference for the currency cards. Its top switches, profile control, charts, bottom navigation, and transfer controls are outside this design.
+The main product decisions are set: use plain HTML, CSS, and JavaScript; make startup and interaction speed release requirements; use Frankfurter v2; require no account; show an editable list of currencies; support the full current currency catalog; save each visitor's choices on their device; and refresh rates automatically. The screenshot is the reference for the currency cards. Its top switches, profile control, bottom navigation, and transfer controls are outside this design.
 
-**The first version will have one main screen.**
+**The app has a Convert screen and a Currency history screen.**
+
+The Convert screen remains the root screen. A Convert / Chart control opens the second screen. Each result card also has a View history action for that currency pair. Keep the converter mounted while it is hidden so the user can return to the same amount draft and scroll position.
+
+The Currency history screen shows one base currency against one quote currency. It has 1W, 1M, 3M, 1Y, and 5Y controls. Use Frankfurter v2's historical rates endpoint with inclusive UTC dates and daily observations. Request only the selected pair and period when the screen opens or the selection changes. Do not request history on converter startup or while the user edits an amount.
+
+Save validated series separately from current rates. Reuse cached larger ranges for smaller periods. Show a saved series offline, and show a clear offline state when no saved series covers the selected period. Save the last pair and period separately from converter preferences. Keep the chart light enough to load after the first screen; include its file in the service-worker installation budget.
 
 | Area | Planned behavior |
 | --- | --- |
@@ -16,6 +22,7 @@ The main product decisions are set: use plain HTML, CSS, and JavaScript; make st
 | Card amount | A large, right-aligned number field. Every card can become the source of the conversion. |
 | Active card | A clear border and a small Source label. Color is not the only indicator. |
 | Secondary information | A short unit-rate line on other cards. Detailed dates are available through the rate status. |
+| History action | A separate View history button opens a pair with this card as the quote currency. |
 | Rate status | Source name, rate date or date range, and when the app last checked for updates. |
 | Compact menu | Manage currencies, Install app when applicable, and About rates. |
 | About rates | Explain reference rates, local storage, source dates, and the link to Frankfurter. Include required source credits. |
@@ -277,14 +284,15 @@ These are implementation targets, not measurements of an app that already exists
 
 | Measure | Initial release target |
 | --- | --- |
-| Initial page JavaScript | At most 25 KiB gzip, including decimal arithmetic and install/update registration code. |
-| Initial app-owned resources | At most 75 KiB compressed for the first screen, excluding rate/catalog API responses and later installation icons. Count fallback catalog data in this budget. |
+| Initial static JavaScript | At most 25 KiB gzip, including the converter code loaded before the first screen is ready. |
+| Complete offline installation | At most 75 KiB gzip for every unique service-worker precache asset plus the worker. Include the lazy chart code, badges, and install icons once each. Exclude rate and catalog API responses. |
 | Cold first visible shell | Within 1.5 seconds on the agreed mobile test profile. The shell must not wait for the rate API. |
 | Cold controls ready | Within 2 seconds on that profile. A first-time rate request may still be pending and must say so. |
 | Repeat open with saved assets and rates | Useful converter within 500 ms on the representative phone, without waiting for network refresh. |
 | Typing and dependent-value update | 95th percentile under 50 ms with the default eight cards. Aim for the next display frame in ordinary use. |
 | Open picker, search, and change source | Visible response within 100 ms at the 95th percentile. No first-use network requirement for the picker. |
 | Full-catalog list | Input response under 100 ms at the 95th percentile, with no repeated main-thread task over 50 ms. |
+| History chart | Cached chart opening and rendering a five-year series target under 100 ms after the module and data are ready. Measure network loading separately. |
 | Layout stability | No unexpected shift when rates, badges, or status messages arrive; target CLS at or below 0.05 in the test flow. |
 
 Draw the app shell from HTML immediately. Read the tiny preferences record once, restore saved rates asynchronously, and start any due network work independently. The currency list must not wait for catalog refresh, installation checks, or remote fonts. Reserve badge and status space so loading does not shift controls.
@@ -314,4 +322,4 @@ The finished handoff will include the source code, lockfile, tests, build and re
 
 A new visitor must be able to open the public URL, see the initial list, edit any amount, search the full current catalog, add and arrange currencies, and return later to the same saved list. With saved data, the same conversions must work offline. A one-hour-due refresh must update results without changing the source amount or interrupting input. Every visible result must use a valid rate and an honest date. Installation must preserve the simple screen and use the correct domain and scope. The measured production build must meet the startup, interaction, and asset-size budgets, or the remaining gap must be resolved before release.
 
-The app name and decimal-arithmetic dependency are approved. The repository and GitHub Pages workflow are selected. A custom domain can wait. The first version does not include accounts, transfers, charts, historical-date selection, rate alerts, fees or spread adjustment, cryptocurrency feeds, advertising, or cloud sync. Those features can be evaluated separately if they become useful.
+The app name and decimal-arithmetic dependency are approved. The repository and GitHub Pages workflow are selected. A custom domain can wait. The app does not include accounts, transfers, arbitrary date entry, rate alerts, fees or spread adjustment, cryptocurrency feeds, advertising, or cloud sync. The five fixed history periods are reference-rate views, not intraday prices or transaction quotes.

@@ -1,13 +1,26 @@
 import { test, expect } from '@playwright/test';
 import { FALLBACK_CATALOG } from '../../src/catalog.js';
+import { historyRows } from './fixtures.js';
 import { createPwaServer } from './pwa-server.js';
 
 const values = { USD: 1, VND: 25000, EUR: 0.9, SGD: 1.3, AUD: 1.5, THB: 35, GBP: 0.75, IDR: 15000 };
 async function serveRates(context) {
-  await context.route('https://api.frankfurter.dev/**', route => {
-    const catalog = route.request().url().includes('/currencies');
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(catalog ? FALLBACK_CATALOG : FALLBACK_CATALOG.filter(item => item.code !== 'USD').map(item => ({ base: 'USD', quote: item.code, rate: values[item.code] || 2, date: new Date().toISOString().slice(0, 10) }))) });
+  const calls = { rates: 0, catalog: 0, history: 0 };
+  await context.route('https://api.frankfurter.dev/**', async route => {
+    const url = new URL(route.request().url());
+    const isCatalog = url.pathname.endsWith('/currencies');
+    const isHistory = url.searchParams.has('from') || url.searchParams.has('to') || url.searchParams.has('quotes');
+    if (isHistory) {
+      calls.history++;
+      const rows = historyRows({ base: url.searchParams.get('base'), quote: url.searchParams.get('quotes'), from: url.searchParams.get('from'), to: url.searchParams.get('to') });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rows) });
+      return;
+    }
+    calls[isCatalog ? 'catalog' : 'rates']++;
+    const body = isCatalog ? FALLBACK_CATALOG : FALLBACK_CATALOG.filter(item => item.code !== 'USD').map(item => ({ base: 'USD', quote: item.code, rate: values[item.code] || 2, date: new Date().toISOString().slice(0, 10) }));
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
+  return calls;
 }
 async function waitForWorker(page) {
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
@@ -21,6 +34,18 @@ async function waitForSavedRates(page) {
       const read = db.transaction('cache').objectStore('cache').get('rates');
       read.onsuccess = () => { resolve(!!read.result); db.close(); };
     };
+  }))).toBe(true);
+}
+async function waitForSavedHistory(page) {
+  await expect.poll(() => page.evaluate(() => new Promise(resolve => {
+    const request = indexedDB.open('fex-cache', 1);
+    request.onsuccess = () => {
+      const db = request.result;
+      const read = db.transaction('cache').objectStore('cache').getAllKeys();
+      read.onsuccess = () => { resolve(read.result.some(key => String(key).startsWith('history:v1:'))); db.close(); };
+      read.onerror = () => { resolve(false); db.close(); };
+    };
+    request.onerror = () => resolve(false);
   }))).toBe(true);
 }
 
@@ -162,6 +187,40 @@ for (const base of ['/', '/fex/']) {
     await lifecycle({ browser, base, offline: true });
   });
 }
+
+test('saved history opens offline while an uncached longer period stays unavailable', async ({ browser, browserName }) => {
+  test.skip(browserName === 'webkit', 'The WebKit runner cannot reload an offline page reliably; Safari/iOS offline launch needs a device check.');
+  test.setTimeout(90_000);
+  const server = await createPwaServer({ base: '/fex/' });
+  const context = await browser.newContext({ locale: 'en-US', serviceWorkers: 'allow' });
+  try {
+    const calls = await serveRates(context);
+    const page = await context.newPage();
+    await page.goto(server.url);
+    await expect(page.locator('#amount-EUR')).toHaveValue('9.00');
+    await page.locator('#chart-tab').click();
+    await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'ready');
+    expect(calls.history).toBe(1);
+    await waitForSavedHistory(page);
+    await waitForWorker(page);
+
+    await context.unroute('https://api.frankfurter.dev/**');
+    await context.setOffline(true);
+    const response = await page.reload();
+    expect(response.fromServiceWorker()).toBe(true);
+    await expect(page.locator('#amount-EUR')).toHaveValue('9.00');
+    await expect(page.locator('#chart-screen')).toBeVisible();
+    await page.locator('#chart-tab').click();
+    await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'offline');
+    await expect(page.locator('#history-chart')).toBeVisible();
+    await expect(page.locator('#chart-rate')).toBeVisible();
+
+    await page.locator('[data-chart-period="5Y"]').click();
+    await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'offline');
+    await expect(page.locator('#history-chart')).toBeHidden();
+    expect(calls.history).toBe(1);
+  } finally { await context.close(); await server.close(); }
+});
 
 test('first Fex install under a broader worker has no false update prompt', async ({ browser }) => {
   test.setTimeout(60_000);

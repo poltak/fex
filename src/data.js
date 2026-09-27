@@ -38,7 +38,7 @@ export function validateSnapshot(input) {
   if (!rates.USD || Number(rates.USD.rate) !== 1 || Object.keys(rates).length < 2) throw new Error('The rate list is incomplete.');
   return { base: 'USD', rates, checkedAt: input.checkedAt };
 }
-async function request({ url, fetchImpl, signal }) {
+export async function request({ url, fetchImpl, signal }) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });

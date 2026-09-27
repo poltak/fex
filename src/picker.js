@@ -2,8 +2,8 @@ import { OTHER_UNIT_CODES } from './catalog.js';
 import { normalizeSearch } from './domain.js';
 
 /** Keep picker controls stable across searches, reopening, and catalog updates.
- * @param {{container:HTMLElement,renderBadge:(element:HTMLElement,code:string)=>void}} options */
-export function createCurrencyPicker({ container, renderBadge }) {
+ * @param {{container:HTMLElement,renderBadge:(element:HTMLElement,code:string)=>void,mode?:'multiple'|'single'}} options */
+export function createCurrencyPicker({ container, renderBadge, mode = 'multiple' }) {
   /** @type {Map<string, ReturnType<typeof createRow>>} */
   const rows = new Map();
   const compareNames = new Intl.Collator().compare;
@@ -35,7 +35,7 @@ export function createCurrencyPicker({ container, renderBadge }) {
     const codeLabel = document.createElement('span'); codeLabel.className = 'currency-code'; codeLabel.textContent = code;
     const name = document.createElement('span'); name.className = 'currency-name';
     const note = document.createElement('span'); note.className = 'picker-note';
-    const input = document.createElement('input'); input.type = 'checkbox'; input.value = code; input.name = 'currency';
+    const input = document.createElement('input'); input.type = mode === 'single' ? 'radio' : 'checkbox'; input.value = code; input.name = mode === 'single' ? 'chart-currency' : 'currency';
     identity.append(codeLabel, name);
     element.append(mark, identity, note, input);
     return { element, input, name, note, search: '', unit: '' };
@@ -56,7 +56,7 @@ export function createCurrencyPicker({ container, renderBadge }) {
           if (other && !hasOther) { elements.push(heading); hasOther = true; }
           const row = rows.get(item.code) || createRow(item.code);
           if (row.name.textContent !== item.name) row.name.textContent = item.name;
-          row.input.setAttribute('aria-label', `Add ${item.code}, ${item.name}`);
+          row.input.setAttribute('aria-label', `${mode === 'single' ? 'Select' : 'Add'} ${item.code}, ${item.name}`);
           row.search = normalizeSearch(`${item.code} ${item.name} ${item.symbol}`);
           row.unit = other ? item.symbol || 'Reference unit' : '';
           rows.set(item.code, row);
