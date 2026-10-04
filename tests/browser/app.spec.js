@@ -184,6 +184,20 @@ test('keeps Retry available when the window gets focus after a failed refresh', 
   await expect(page.locator('#rate-status')).toHaveAttribute('data-phase', 'error');
 });
 
+test('uses the saved catalog after a reload and does not request it again', async ({ page }) => {
+  const calls = await mockApi(page);
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await expect.poll(() => savedKeys(page)).toEqual(expect.arrayContaining(['catalog', 'rates']));
+  expect(calls.catalog).toBe(1);
+  await page.reload();
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await savedKeys(page);
+  await page.waitForTimeout(250);
+  expect(calls.catalog).toBe(1);
+  expect(calls.rates).toBe(1);
+});
+
 test('fits a narrow phone, keeps picker keyboard access, and has no page errors', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 320, height: 740 });

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { amount, catalog, historyRows, mockApi, rateRows, values } from './fixtures.js';
+import { amount, catalog, historyRows, mockApi, rateRows, savedKeys, values } from './fixtures.js';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -14,16 +14,7 @@ async function waitForHistory(page) {
 }
 
 async function hasSavedHistory(page) {
-  return page.evaluate(() => new Promise(resolve => {
-    const request = indexedDB.open('fex-cache', 1);
-    request.onsuccess = () => {
-      const db = request.result;
-      const keys = db.transaction('cache').objectStore('cache').getAllKeys();
-      keys.onsuccess = () => { resolve(keys.result.some(key => String(key).startsWith('history:v1:'))); db.close(); };
-      keys.onerror = () => { resolve(false); db.close(); };
-    };
-    request.onerror = () => resolve(false);
-  }));
+  return (await savedKeys(page)).some(key => key.startsWith('history:v1:'));
 }
 
 async function hasSavedCatalogCode(page, code) {
@@ -133,6 +124,13 @@ test('swap and single-currency picker change only the chart pair', async ({ page
   await expect(page.locator('#chart-quote')).toHaveAccessibleName(/^Quote currency: USD/);
   await expect.poll(() => calls.history).toBe(3);
   await waitForHistory(page);
+
+  // A choice of the current currency closes the picker and changes nothing.
+  await page.locator('#chart-quote').click();
+  await page.getByRole('radio', { name: /^Select USD/ }).click();
+  await expect(picker).toBeHidden();
+  await expect(page.locator('#chart-quote')).toHaveAccessibleName(/^Quote currency: USD/);
+  expect(calls.history).toBe(3);
 
   await page.locator('#convert-tab').click();
   await expect(page.locator('#convert-screen')).toBeVisible();
@@ -328,6 +326,19 @@ test('chart point selection works with keyboard and pointer', async ({ page }) =
   const box = await chart.boundingBox();
   await page.mouse.move(box.x + box.width * 0.12, box.y + box.height * 0.5);
   await expect.poll(() => chart.getAttribute('data-chart-point')).not.toBe(last);
+});
+
+test('the chart draws one time for each loaded series', async ({ page }) => {
+  await mockApi(page);
+  await page.goto('/');
+  await openChart(page);
+  await waitForHistory(page);
+  await expect(page.locator('#history-chart')).toBeVisible();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await page.evaluate(() => performance.getEntriesByName('fex:chart-render').length)).toBe(1);
+  await expect(page.locator('#chart-picker-options .picker-option')).toHaveCount(0);
+  await page.locator('#chart-quote').click();
+  await expect(page.locator('#chart-picker-options .picker-option')).toHaveCount(catalog.length);
 });
 
 test('empty historical response has a clear state', async ({ page }) => {

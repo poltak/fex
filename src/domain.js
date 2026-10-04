@@ -1,6 +1,8 @@
 import Decimal from 'decimal.js-light';
 
+// One shared configuration. Other modules import Decimal from here.
 Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP, toExpNeg: -100, toExpPos: 100 });
+export { Decimal };
 
 const numberLocaleCache = new Map();
 const integerFormatCache = new Map();
@@ -35,9 +37,9 @@ function validGroups({ text, separator, primaryGroup, secondaryGroup }) {
     && groups.slice(1, -1).every(group => group.length === secondaryGroup);
 }
 
-/** @param {{text:string,locale?:string,enforceLimits?:boolean}} options
+/** @param {{text:string,locale?:string}} options
  * @returns {{status:'valid'|'empty'|'incomplete'|'invalid',value?:string,message?:string}} */
-export function parseAmount({ text, locale = 'en-US', enforceLimits = true }) {
+export function parseAmount({ text, locale = 'en-US' }) {
   const settings = numberLocale(locale);
   const trimmed = text.trim();
   const raw = settings.asciiDigits ? trimmed : [...trimmed].map(char => settings.toAscii.get(char) ?? char).join('');
@@ -66,7 +68,7 @@ export function parseAmount({ text, locale = 'en-US', enforceLimits = true }) {
   if (fraction !== undefined && !/^\d*$/.test(fraction)) return invalid();
   const digits = whole.replace(/[^0-9]/g, '');
   if (!digits && fraction === undefined) return invalid();
-  if (enforceLimits && (digits.length > 15 || (fraction?.length || 0) > 12)) return invalid('Use at most 15 whole-number digits and 12 decimal digits.');
+  if (digits.length > 15 || (fraction?.length || 0) > 12) return invalid('Use at most 15 whole-number digits and 12 decimal digits.');
   if (fraction === '') return { status: 'incomplete' };
   return { status: 'valid', value: new Decimal(`${digits || '0'}${fraction !== undefined ? `.${fraction}` : ''}`).toFixed() };
 }
@@ -92,11 +94,8 @@ export function createConverter({ rates }) {
   };
 }
 
-/** @param {{amount:string,source:string,target:string,rates:Rates}} options */
-export function convertAmount({ amount, source, target, rates }) { return createConverter({ rates })({ amount, source, target }); }
-
-/** @param {string} value @param {string} locale @param {boolean} [grouped] */
-function localize(value, locale, grouped = true) {
+/** @param {{value:string,locale:string,grouped?:boolean}} options */
+function localize({ value, locale, grouped = true }) {
   const [whole, fraction] = value.split('.');
   const key = `${locale}:${grouped}`;
   if (!integerFormatCache.has(key)) integerFormatCache.set(key, new Intl.NumberFormat(locale, { useGrouping: grouped, maximumFractionDigits: 0 }));
@@ -113,21 +112,31 @@ export function formatAmount({ amount, currency, locale = 'en-US' }) {
     const digits = minorUnitCache.get(currency);
     const value = new Decimal(amount);
     const unit = new Decimal(10).pow(-digits);
-    if (!value.isZero() && value.abs().lt(unit)) return `<${localize(unit.toFixed(digits), locale)}`;
-    return localize(value.toFixed(digits), locale);
+    if (!value.isZero() && value.abs().lt(unit)) return `<${localize({ value: unit.toFixed(digits), locale })}`;
+    return localize({ value: value.toFixed(digits), locale });
   } catch { return '—'; }
 }
 
 /** @param {{amount:string,locale?:string}} options */
 export function formatEditable({ amount, locale = 'en-US' }) {
-  try { return localize(new Decimal(amount).toFixed(), locale, false); } catch { return ''; }
+  try { return localize({ value: new Decimal(amount).toFixed(), locale, grouped: false }); } catch { return ''; }
 }
 
-/** @param {{source:string,target:string,rates:Rates,locale?:string}} options */
-export function formatUnitRate({ source, target, rates, locale = 'en-US' }) {
-  const value = convertAmount({ amount: '1', source, target, rates });
+/** @param {{source:string,target:string,convert:ReturnType<typeof createConverter>,locale?:string}} options */
+export function formatUnitRate({ source, target, convert, locale = 'en-US' }) {
+  const value = convert({ amount: '1', source, target });
   if (value === null) return 'Rate unavailable';
-  return `1 ${source} ≈ ${localize(new Decimal(value).toSignificantDigits(6).toFixed(), locale)} ${target}`;
+  return `1 ${source} ≈ ${localize({ value: new Decimal(value).toSignificantDigits(6).toFixed(), locale })} ${target}`;
+}
+
+/** @param {{checkedAt:number,now?:number}} options */
+export function formatChecked({ checkedAt, now = Date.now() }) {
+  const minutes = Math.max(0, Math.floor((now - checkedAt) / 60000));
+  if (minutes < 1) return 'Checked just now';
+  if (minutes < 60) return `Checked ${minutes} min ago`;
+  if (minutes < 1440) return `Checked ${Math.floor(minutes / 60)} hr ago`;
+  const days = Math.floor(minutes / 1440);
+  return `Checked ${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 
 /** @param {{source:string,codes:string[],rates:Rates}} options */
