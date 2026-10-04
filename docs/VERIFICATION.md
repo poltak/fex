@@ -1,77 +1,73 @@
-# Local verification
+# Verification
 
-## Current pnpm verification
+`pnpm run check` passed every step on 4 October 2026, on one development computer.
 
-`pnpm install --frozen-lockfile` and `pnpm run check` passed. The check passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped because WebKit returned internal errors for offline reloads and new pages. Type checks, lint, the production build, and size checks passed.
+| Step | Result |
+| --- | --- |
+| Type check and lint | No errors |
+| Unit tests | 129 passed |
+| Browser tests in Chromium, Firefox, and WebKit | 135 passed, 3 skipped |
+| Performance checks in Chromium | 3 passed |
+| Initial JavaScript, gzip | 23.02 KiB of the 25 KiB limit |
+| Offline installation, gzip | 59.62 KiB of the 75 KiB limit, for 19 files and the worker |
 
-The root build measured 23.68 KiB gzip for initial JavaScript and 61.32 KiB for the complete offline installation. `FEX_BASE_PATH=/fex/ pnpm run build` and `pnpm run check:size` also passed. The `/fex/` build measured 23.69 KiB and 61.33 KiB.
+A build with `FEX_BASE_PATH=/fex/` has the same sizes to within 0.01 KiB.
 
-These local checks do not verify the deployed chart or physical phone performance. See [the review findings and fixes](CODE_REVIEW.md).
+Playwright skips the three WebKit offline tests, because its WebKit build returns an internal error when it loads a page offline. Chromium and Firefox pass the same tests.
 
-## Historical npm verification
+## What the tests cover
 
-Before the pnpm migration, `npm run check` passed type checks, lint, a production build, size checks, unit tests, browser tests, and performance tests. The historical run passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped. The old npm command names below record that earlier run. Use the pnpm commands above and in the README for new checks.
+The converter tests cover conversion from each card, precision, empty, zero, incomplete, and invalid input, cursor position, the picker, list order and removal, Undo, saved choices, errors and Retry, the timing of rate checks, an edit during a rate check, changes from a second tab, keyboard focus, and localized digits. They confirm that an amount change makes no request and that Retry stays available after the window gets focus.
 
-## Functional checks
+The chart tests cover one request per period on demand, reuse of a saved longer range, pair selection, links and browser history, the converter's amount text and scroll position, requests that finish out of order, keyboard and pointer selection, the empty, one-point, flat, error, and offline states, a reload after a reconnect, and layout at 320 px and on a desktop. They confirm that a window focus keeps the selected point and makes no request, and that the chart draws once per series.
 
-`npm run check` exited with code 0. It passed 123 unit tests, 123 browser tests, and three performance checks. Three WebKit offline-navigation checks were skipped because WebKit returns an internal error for offline reloads and new pages. Type checks, lint, production build, and size checks also passed.
+The storage tests cover a database that does not respond, a late connection, blocked storage, corrupt records, clock changes, the 12-series limit, and deletion of corrupt or surplus history when the cache loads.
 
-The browser checks cover conversion from any row, retained precision, empty/zero/incomplete/invalid input, cursor preservation, the complete picker, list order and removal, Undo, saved choices, errors and retry, refresh timing, editing during refresh, cross-tab changes, and keyboard focus. No request is made when an amount changes. Chart checks cover on-demand period requests and cache reuse, pair selection, deep links and browser history, converter draft and scroll preservation, racing requests, keyboard and pointer selection, empty/one-point/flat/error/offline states, saved history, reconnect refresh, responsive phone and desktop layout, SVG axis labels, and delayed saved-catalog restoration.
+The service worker tests make builds with different file hashes and serve them at `/` and `/fex/`. They cover updates, rollback, saved amount text, cache retention while an old tab is open, cleanup after it closes, and cache matching with `Vary: Origin`. A path that does not exist does not get the app page, and the app's cache holds no API responses. The `/fex/` server sends no security headers, and the tests confirm that the policy in the HTML blocks inline scripts. When another worker controls the whole origin, the first Fex install shows no update notice.
 
-The review added regressions for stalled browser storage, localized digits, Undo after a newer cross-tab amount, unchanged card metadata during typing, and picker focus and node reuse across catalog updates and reopening. These cases pass in Chromium, Firefox, and WebKit. Unit tests also cover storage deadlines, late connections, locale-specific grouping, and clock tolerance for rates and catalogs.
+## Performance
 
-Real service worker checks use temporary builds with distinct JavaScript hashes and the production content security policy. They cover `/` and `/fex/`, updates, rollback, saved drafts, two-tab cache retention, cleanup after the old tab closes, and `Vary: Origin` cache matching. They also check that missing routes are not replaced with the app and that API responses are not put in the shell cache. The `/fex/` server sends no custom security headers; tests verify that the generated HTML CSP blocks inline scripts, as needed for GitHub Pages.
+The tests use Chromium with a 390 × 844 viewport. The startup and input rows slow the CPU four times. The cold start also limits the network to 1.6 Mbps with 150 ms latency. The chart rows have no throttling. These are lab results, not results from a phone.
 
-Chromium and Firefox pass offline reopening. WebKit passes the online lifecycle cases, but its offline navigation returns an internal error for reloads and new pages. The three WebKit offline-specific checks are marked skipped. Safari/iOS offline launch needs a physical-device check; it is not claimed as verified.
-
-A first-install regression test starts with another app's worker controlling the wider origin. Fex must not show an update prompt unless its own registration has an active worker and a waiting update. This test failed before the fix and passes on all three engines. Another test checks that an old tab clears its update notice when a different tab accepts the update, without forcing the old tab to reload.
-
-## Performance sample
-
-Except for the current bundle-size and chart rows, these measurements are from an earlier Chromium 390 × 844 profile with four-times CPU slowdown; cold-load API fixtures used 1.6 Mbps throughput and 150 ms latency. The chart rows are from the final local Chromium run with the module and data cached, without CPU or network throttling. These are lab results, not phone guarantees.
-
-| Check | Measured | Target |
+| Check | Measured | Limit |
 | --- | ---: | ---: |
-| Initial JavaScript, gzip | 23.68 KiB | 25 KiB |
-| Page and offline installation, gzip | 61.32 KiB | 75 KiB |
-| First contentful paint | 468 ms | 1,500 ms |
-| Controls ready | 577 ms | 2,000 ms |
-| Offline saved-rate restore, p95 of five loads | 77 ms | 500 ms |
-| Input handler, eight currencies, p95 of 20 edits | 0.8 ms | 50 ms |
-| Input handler, all 166 codes, p95 of 20 edits | 4.2 ms | 100 ms |
-| Picker first opening | 28.8 ms | 100 ms |
-| Picker reopening, p95 of ten opens | 18.9 ms | 100 ms |
-| Search handler, p95 | 2.3 ms | 100 ms |
-| Cached chart opening, after module and data are ready | 8.8 ms | 100 ms |
-| Five-year chart rendering, after data is ready | 1.2 ms for 1,827 points | 100 ms |
-| Cold-load layout shift | 0.00027 | 0.05 |
+| First contentful paint on a cold start | 480 ms | 1,500 ms |
+| Controls ready on a cold start | 588 ms | 2,000 ms |
+| Saved rates on screen after an offline reload, 95th percentile of 5 | 96 ms | 500 ms |
+| Input handler with 8 currencies, 95th percentile of 20 | 1.0 ms | 50 ms |
+| Input handler with 166 currencies, 95th percentile of 20 | 4.5 ms | 100 ms |
+| First opening of the picker | 31 ms | 100 ms |
+| Later openings of the picker, 95th percentile of 10 | 19 ms | 100 ms |
+| Search handler, 95th percentile of 10 | 5.3 ms | 100 ms |
+| Chart opening with saved data | 2.5 ms | 100 ms |
+| Chart draw of five years, 1,827 points | 1.5 ms | 100 ms |
+| Layout shift on a cold start | 0.00005 | 0.05 |
 
-The final chart sample recorded two historical requests. No long tasks were observed during the full-list input sample. Handler measurements include calculations and DOM writes; they are not field INP measurements. The first-load shell reserves card space to avoid shifting the footer when JavaScript starts.
+The full-catalog input run had no long tasks. Handler times include the calculation and the page writes. They are not field INP values. Two runs of the same build can differ by a few milliseconds.
 
-The same-machine converter sample before the review fixes measured 1.4 ms for the default input handler, 5.1 ms for all 166 codes, and 34.8 ms for first picker opening. Those figures remain regression references; the final feature check is the source for the bundle sizes and chart measurements shown above. These short samples have normal run-to-run variance; they do not establish a fixed percentage improvement. The DOM regression test separately confirms that valid typing no longer writes unchanged card attributes.
+The review of 4 October cut the chart opening from 9 ms to 2.3 ms, measured twice for each build on the same computer. The other rows stayed within their usual variation. [The code reviews](CODE_REVIEW.md) list the changes.
 
-Run `pnpm run test:performance` after a production build to repeat these checks. JSON measurements and phone/desktop screenshots are saved in `test-results/`. The phone list, full desktop list, and currency picker were inspected visually earlier. The final chart was also inspected at 320px and desktop widths; its full date axis remained visible.
+`pnpm run test:performance` repeats these checks after a build and writes the measurements and screenshots to `test-results/`.
 
-## Live data check
+## Live API
 
-Before the pnpm migration, `npm run test:live` passed for the catalog, latest USD table, and one-week USD/VND history. All three endpoints returned HTTP 200 with CORS `*`; the historical response contained eight points.
+`pnpm run test:live` passed on 4 October 2026. The catalog, the latest table, and one week of USD/VND history each returned HTTP 200 with `Access-Control-Allow-Origin: *`. The catalog had 165 codes, and the table had 165 rates including USD. The history had six observations. The check runs in Node and sends no amount.
 
-The check sends only catalog, latest USD-table, and selected USD/VND history GET requests. It sends no amount. It validates response headers from Node; final-domain browser access is a separate release check. Live data checks are deliberately outside the deterministic test suite.
+## Published site
 
-## GitHub Pages verification
+The site is at <https://poltak.github.io/fex/>, and Pages uses GitHub Actions as its source.
 
-The initial **Check** and **Deploy GitHub Pages** runs passed for `0b93e65`. Pages was already enabled with GitHub Actions as its source; no API enablement was performed. The public site is [poltak.github.io/fex](https://poltak.github.io/fex/). Later pushes publish through the same checked workflow.
+- The first Check and Deploy GitHub Pages runs passed for commit `0b93e65`.
+- Commit `a54c27d` merged the two workflows into Check and deploy. Its check, Pages build, and deployment jobs passed.
+- The HTML, manifest, and worker returned HTTP 200 with the correct content types. The manifest uses `/fex/` for its ID, start URL, and scope. The HTML contains the content security policy.
+- GitHub serves the files with a cache time of 600 seconds. The worker registration uses `updateViaCache: 'none'`.
+- In a browser on the published site, conversion worked and the picker showed the full catalog.
 
-Commit `a54c27d` combined those workflows. GitHub started exactly one **Check and deploy** run, and its check, Pages build, and deployment jobs passed. Pull requests now run checks only. Main publication waits for the single check job, and full main workflow runs are serialized.
+Only local runs have verified the changes of 4 October. A workflow run must pass before they reach the published site.
 
-The public HTML, manifest, and worker returned HTTP 200 with the expected content types. The manifest uses `/fex/` for its ID, start URL, and scope. The HTML includes the static CSP. GitHub serves these files with a 600-second cache lifetime; registration uses `updateViaCache: 'none'`.
+## Not yet verified
 
-In the live browser, USD 100 produced VND 2,594,300 and EUR 87.73 with the displayed reference rates. The picker showed 166 entries and found JPY by code. The source was restored to USD 10 after this check. These are functional observations of that published data snapshot, not guaranteed transaction prices.
-
-## Release checks still required
-
-- Install and launch on physical Android Chrome and iPhone Safari, including offline launch and mobile decimal keyboards.
-- Check installation and offline launch on the public site, and repeat domain checks if a custom domain is added.
-- Review applicable provider terms and credits before public deployment.
-
-The repository includes one **Check and deploy** workflow. Deployment requires successful checks and Pages enabled with GitHub Actions as its source. Disabled Pages produces a successful build with deployment skipped; no workflow enables it through the API. Workflow results must be read from GitHub after a push; a local pass is not a CI pass. The custom domain remains undecided.
+- Installation, offline start, and the decimal keyboard on a physical Android phone and iPhone.
+- Offline start in Safari.
+- Startup and input timing on a phone.
+- The data providers' terms and credits.

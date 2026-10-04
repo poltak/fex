@@ -1,24 +1,40 @@
-# Code review — 26 September 2026
+# Code reviews
 
-The primary agent completed this review without subagents. The review covered all application modules, the HTML and CSS, storage and refresh behavior, service-worker lifecycle, tests, build scripts, and the Pages workflow. The focus was performance and maintenance.
+Each review covered every application module, the HTML and CSS, the service worker, the tests, the build scripts, and the workflow. [Verification](VERIFICATION.md) has the test and performance results.
 
-## Findings and fixes
+## 4 October 2026
+
+This review made two passes. The second pass also reviewed the changes from the first.
 
 | Finding | Effect before the fix | Change |
 | --- | --- | --- |
-| Repeated picker construction | Every opening created all 166 controls again. A catalog update could remove the focused checkbox. | Moved picker code to `src/picker.js`. Reuse controls by currency code. Preserve focus, selection, and scroll during catalog changes. Cache the name comparator and use a Set for membership checks. |
-| Repeated card writes | Each valid edit rewrote four unchanged attributes per card. | Update source, error, and accessibility state only when it changes. Amounts still update immediately. |
-| Unbounded storage waits | A stalled IndexedDB open could prevent the first rate request. A stalled write could hold the refresh controller in flight. | Bound database opens and transactions to one second. Abort stalled transactions, close late connections, and retain the memory fallback. Use one transaction-completion helper. |
-| Locale mismatch | Arabic, Persian, and Bengali amounts could contain local whole digits with Latin fractional digits. The parser rejected those displayed amounts. Indian grouping and Swiss separators also failed. | Cache locale digits and group sizes from Intl. Use the same digit system for display and parsing. Retain exact decimal strings and reject malformed groups. |
-| Undo after a cross-tab change | Undo could restore the old amount after another tab had supplied a newer one. | Use one preference-application function and advance the revision for imported changes. Undo can restore a removed row without replacing newer values. |
-| Future catalog timestamp | A saved timestamp after a clock change could prevent catalog refresh for days. | Use the same freshness check for hourly rates and daily catalogs, with a bounded clock tolerance. |
+| A saved rate table reset the status | After a failed rate check, a window focus read the same saved table again and set the status to ready. Retry disappeared while the text still reported the failure. | A table that is not newer no longer changes the status. The phase stays `error` while an error is set. |
+| Window focus cleared the chart | Each focus, tab return, and reconnect cleared the chart, loaded the same series, and moved the selection to the last point. | Loading the range already on screen keeps the series. If the series is less than one hour old, the load does nothing. |
+| An online request reused an offline load | When the connection returned during an offline load, the chart stayed offline. | The app reuses a load in progress only for the same connection state. |
+| The history cache did too much work | Each chart load read the whole IndexedDB store twice, validated each record at least three times, copied every point more than once, and rewrote the record to update its last-use time. | The app reads only history keys, once per page load. It validates each record once and does not copy it. It writes the last-use time at most once an hour. |
+| The chart drew twice | The app hid the chart before each load, so the resize observer drew it a second time. | The observer draws only when the size changed. |
+| Each pointer move created formatters | Each pointer move created two `Intl` formatters and two SVG nodes. Each draw created eight formatters. | The chart creates its formatters once and moves one selection line and point. A pointer move to the same point does nothing. |
+| The chart built its picker too soon | The chart built 166 picker rows when it opened and sorted the catalog three times. | The chart builds the rows when the picker opens. |
+| `getEntriesByName` ran on each keystroke | The timing helper read every performance entry after each input event. | A counter replaces the read. |
+| Helpers had several copies | The date and rate validators, the code pattern, the Decimal configuration, the retry delays, the text for the time of the last check, and the period list each had two or three copies. | Each has one copy. |
+| Some code had no caller | Nothing used a navigation branch, the `destroy` and `dispose` methods, some options that only tests passed, two icon symbols, three CSS rules, and an SVG group. | The review removed them. Chart navigation has three fewer state variables. |
+| The build did unneeded work | Each build ran `sharp` to write five icons that are already in the repository. The build published the icon source file and the service worker saved it, but nothing used it. The precache list had five duplicate entries. | A build no longer makes icons, and the source file is gone. The list has 19 entries with no duplicates. |
+| The size script parsed by hand | A 30-line parser read the worker one character at a time. | One regular expression does the same. The script is 40 lines, down from 97. |
+| `src/app.js` had long lines | Nine lines had more than 200 characters, with nested conditional expressions. | The file has the same size in bytes, with one statement per line and plain `if` statements for the status text. |
 
-The five functional failure cases were reproduced before their fixes. New tests cover all listed behavior, including stalled reads and writes, late database connections, picker focus after a sort change, retained picker nodes, locale round trips, and cache clock tolerance. The browser locale fixture sets the requested numbering system explicitly: macOS WebKit exposes only `ar` through `navigator.language` even when Playwright requests `ar-EG-u-nu-arab`.
+The review also made smaller changes. The status now says "Checked 1 day ago" where it said "1 days". Choosing the current currency in the chart picker closes the dialog. The Pages build job no longer repeats its job condition on each step. Functions with three positional inputs now take one object.
 
-No production dependency was added. Decimal arithmetic, the rate API, the public URL, and the page layout remain the same.
+One change guards against a failure that the review did not reproduce. The app now reads the saved catalog before it decides to request the catalog. Before, a slow database could cause a catalog request on each page load.
 
-## Validation
+New tests cover each fix that changes behavior. Three of them fail on the build from before this review. They test Retry after a window focus, the selected chart point after a window focus, and the number of chart draws.
 
-See [the verification record](VERIFICATION.md) for current test counts, performance samples, size limits, and remaining device checks. Tests use the production build. The Pages workflow runs the full check once before publication.
+## 26 September 2026
 
-The review keeps the existing two WebKit offline-navigation skips visible. Those skips do not establish physical iPhone offline behavior. Handler timings are lab measurements; they are not field INP measurements.
+| Finding | Effect before the fix | Change |
+| --- | --- | --- |
+| The picker rebuilt itself on each opening | Each opening created 166 controls. A catalog update could remove the focused checkbox. | `src/picker.js` keeps one control per code and preserves focus, selection, and scroll position. |
+| Card writes changed nothing | Each edit wrote four attributes on each card. | The app writes an attribute only when it changes. |
+| Storage waits had no limit | A stalled IndexedDB could block the first rate request or hold up a rate check. | Opens and transactions time out after one second, and the app continues from memory. |
+| Locale digits failed to parse | Amounts in Arabic, Persian, and Bengali digits, Indian grouping, and Swiss separators did not parse. | The parser gets digits and group sizes from `Intl` and displays the same digits. |
+| Undo ignored another tab's change | Undo could restore an amount older than the one from the other tab. | Undo restores the row and keeps newer values. |
+| The catalog time could be in the future | After a clock change, a saved time in the future could stop catalog requests for days. | Rates and the catalog share one age check with a five-minute tolerance. |

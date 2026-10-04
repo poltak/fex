@@ -1,325 +1,210 @@
-**Fex will be a public currency converter that works as a website and an installed PWA.**
+# Fex product rules and limits
 
-This is the accepted implementation plan, prepared on 26 September 2026. The user approved the name Fex and decimal.js-light, authorized implementation and local Git commits, and deferred the domain choice until deployment. The initial project folder was empty. The user later authorized GPT-6 Sol sub-agents for bounded work, with the primary agent responsible for review and final validation.
+Fex is a public currency converter that works as a website and as an installed PWA. This document lists the rules the app follows and the limits a release must meet. It began as the implementation plan of 26 September 2026.
 
-Implementation is complete. The user selected `git@github.com:poltak/fex.git` as the remote and requested GitHub Pages support, with Pages enablement left to them. See [verification](docs/VERIFICATION.md) and [deployment](docs/DEPLOYMENT.md) for the current result and release steps.
+Fex has no accounts, sync between devices, transfers, fees or spread, rate alerts, date picker, cryptocurrency feeds, advertising, analytics, or theme switch.
 
-The main product decisions are set: use plain HTML, CSS, and JavaScript; make startup and interaction speed release requirements; use Frankfurter v2; require no account; show an editable list of currencies; support the full current currency catalog; save each visitor's choices on their device; and refresh rates automatically. The screenshot is the reference for the currency cards. Its top switches, profile control, bottom navigation, and transfer controls are outside this design.
+## Screens
 
-**The app has a Convert screen and a Currency history screen.**
+Convert is the first screen. It shows one card for each selected currency, in the user's order.
 
-The Convert screen remains the root screen. A Convert / Chart control opens the second screen. Each result card also has a View history action for that currency pair. Keep the converter mounted while it is hidden so the user can return to the same amount draft and scroll position.
-
-The Currency history screen shows one base currency against one quote currency. It has 1W, 1M, 3M, 1Y, and 5Y controls. Use Frankfurter v2's historical rates endpoint with inclusive UTC dates and daily observations. Request only the selected pair and period when the screen opens or the selection changes. Do not request history on converter startup or while the user edits an amount.
-
-Save validated series separately from current rates. Reuse cached larger ranges for smaller periods. Show a saved series offline, and show a clear offline state when no saved series covers the selected period. Save the last pair and period separately from converter preferences. Keep the chart light enough to load after the first screen; include its file in the service-worker installation budget.
-
-| Area | Planned behavior |
+| Part | Rule |
 | --- | --- |
-| Header | Small app name, Add currency button, and a compact menu. |
-| Currency list | One card per selected currency, in the order chosen by the user. |
-| Card identity | Currency badge, ISO code such as VND, and currency name. The code remains visible even when space is limited. |
-| Card amount | A large, right-aligned number field. Every card can become the source of the conversion. |
-| Active card | A clear border and a small Source label. Color is not the only indicator. |
-| Secondary information | A short unit-rate line on other cards. Detailed dates are available through the rate status. |
-| History action | A separate View history button opens a pair with this card as the quote currency. |
-| Rate status | Source name, rate date or date range, and when the app last checked for updates. |
-| Compact menu | Manage currencies, Install app when applicable, and About rates. |
-| About rates | Explain reference rates, local storage, source dates, and the link to Frankfurter. Include required source credits. |
+| Card identity | Each card shows a badge, the ISO code, and the name. The code stays visible when space is tight. |
+| Card amount | Each card has a large, right-aligned number field. Any card can become the source. |
+| Source card | A border and a Source label mark the source, so color is not the only sign. |
+| Unit rate | Each other card shows one short line such as `1 USD ≈ 26,000 VND`. |
+| View history | Each other card has a button that opens the chart for the source and that card's currency. |
+| Rate status | The status shows the rate date or date range, and the time of the last check. |
+| Menu | The menu holds Manage currencies, About the rates, and Install Fex when the browser can install the app. |
 
-Use a dark background, rounded dark cards, large numbers, and generous spacing, as in the screenshot. Use one small accent color for focus and actions. Do not add a theme switch to the first version. Use a system font and tabular numerals so values align as they change.
+Currency history is the second screen. It shows one base currency against one quote currency for 1W, 1M, 3M, 1Y, or 5Y. [The chart rules](docs/HISTORY_CHART_PLAN.md) describe it. The converter stays in the page while the chart shows, so the amount text and the scroll position stay as the user left them.
 
-On a phone, cards use the full available width with approximately 16 px side margins. On a desktop, keep the same single-column interaction in a centered container, with a maximum width of about 720 px. Use larger available space for clear labels, rather than a separate desktop dashboard. Support narrow screens from 320 px, landscape mode, and 200% text zoom.
+The design is dark, with rounded cards, large tabular numbers, a system font, and one accent color. The layout is one column, at most 672 px wide. It must work from a width of 320 px, in landscape, and at 200% text zoom.
 
-Use local badge assets where a flag is appropriate. Use a currency or regional badge where a currency belongs to several countries. Currency codes and names must remain sufficient when an image is unavailable. Do not load flags from a third-party image service.
+Badges are local files, and the app loads no images from another site. The code and name must be enough when a badge fails to load.
 
-**The initial list will follow the screenshot, and users can change all of it.**
+## Amount input
 
-Start with VND, USD, EUR, SGD, AUD, THB, GBP, and IDR, in that order. Start with USD selected and an amount of 10. These are proposed defaults, not a restriction on the available currencies. Do not open the keyboard automatically on first load.
+1. A tap in a card's field makes that currency the source. The card does not move.
+2. If the card showed a result, its unrounded value becomes the source amount. Selecting a card must not change the amount through display rounding.
+3. The first focus selects the text. Later taps place the cursor.
+4. Each valid change updates the other cards on that keystroke, with no network request and no Convert button.
+5. Enter or Done ends the edit. A tap on another amount changes the source.
+6. New rates keep the source amount and update the other amounts.
 
-On later visits, restore the user's own list, order, source currency, and amount. Public access does not mean a shared list: each browser has its own saved state. There is no account or device-to-device sync.
+The app keeps the raw text apart from the parsed value. It does not add separators, move the cursor, or rewrite the text while the user types.
 
-**Entering an amount will update the other cards immediately.**
-
-1. The user taps a card's number field. That currency becomes the source, and the card stays in its current position.
-2. If the card was a result, use its existing unrounded converted value as the new source value. Selecting a card alone must not change the economic amount through display rounding.
-3. The first focus can select the displayed text for quick replacement. Further taps allow normal cursor placement and editing.
-4. On each valid input change, calculate the other amounts locally. There is no Convert button and no network request for typing.
-5. Enter or the keyboard's Done action finishes editing. Tapping another amount changes the source. Tapping outside removes keyboard focus but keeps the source selection.
-6. When fresh rates are applied, keep the source amount fixed and update the other amounts.
-
-Keep the raw text being edited separate from its parsed decimal value. Do not insert thousands separators, move the cursor, or rewrite the text while the user types. Do not derive the next conversion from a rounded number shown in another card.
-
-| Input condition | Required result |
+| Input | Result |
 | --- | --- |
-| Valid positive amount | Update all available conversions immediately. |
-| Zero | Show actual zero results with the normal currency precision. |
-| Empty field | Keep it empty; show a dash in dependent cards. Empty is not zero. |
-| Incomplete decimal while typing | Allow the draft; show dependent cards as unavailable until the value can be parsed. |
-| Invalid paste | Explain the problem beside the field. Do not silently change the number or continue to show old results as if they match it. |
-| Negative value | Show “Enter zero or a positive amount.” Negative amounts are outside the first version. |
-| Very large input | Support up to 15 whole-number digits and 12 fractional digits for user-entered amounts. Reject longer input with a clear message. |
-| Conversion smaller than the normal display unit | Show a less-than value, such as “<0.01”, or a useful expanded decimal. Do not show a nonzero result as zero. |
+| A valid positive amount | All available conversions update. |
+| Zero | The other cards show zero with each currency's usual precision. |
+| Empty | The field stays empty and the other cards show a dash. Empty is not zero. |
+| An incomplete decimal such as `10.` | The text stays. The other cards show a dash until the value is complete. |
+| Invalid text | A message appears below the field. The app does not change the number or keep old results on screen. |
+| A negative number | The message says "Enter zero or a positive amount." |
+| More than 15 whole digits or 12 decimal digits | The message gives the limit. |
+| A result smaller than the display unit | The card shows a less-than value such as `<0.01`. A nonzero result never shows as zero. |
 
-Use a text field with a decimal keyboard hint. Format inactive values with the browser's locale and the currency's usual minor units: for example, JPY and VND normally have no decimal places, while USD has two. Allow decimal input even for currencies whose usual display has no decimal places. Preserve the entered precision in the active field.
+Inactive amounts use the browser's locale and the currency's usual decimal places. VND and JPY have none, and USD has two. The source field keeps the precision the user typed.
 
-Parse the locale's decimal and grouping characters explicitly. Support common pasted spaces, including nonbreaking spaces, when they are valid grouping characters. Accept an alternative decimal point only when the value is unambiguous. Reject ambiguous mixed formats rather than guessing. Validate this with English, Vietnamese, German, and French number formats.
+The parser reads the locale's decimal and group characters. It accepts spaces as group characters. It accepts a point as the decimal only when the text has one possible meaning, and it rejects text with two. The tests cover English, Vietnamese, German, French, Arabic, Persian, Bengali, Hindi, and Swiss German formats.
 
-Keep full internal precision when a calculated card becomes the source. Its editable text can use a shorter presentation, but focus alone must not replace the internal amount with that presentation. A real edit makes the new text authoritative. Extremely small calculated source amounts must retain a meaningful nonzero representation.
+## Currency list
 
-Use adaptive precision for unit-rate lines. For example, a VND-to-USD rate must not become “1 VND = 0.0000 USD”, as it does in the reference image. Increase significant digits or use a larger source unit such as 1,000 VND. Use an approximation sign for displayed rates.
+The picker uses the full current catalog from [Frankfurter](https://api.frankfurter.dev/v2/currencies). "All currencies" means every current code Frankfurter has. Metals and other units sit in a group named Other supported units.
 
-**The currency picker will use the complete current Frankfurter catalog.**
+- Search matches the code, name, or symbol. Case and accents do not matter, so "dong" finds Vietnamese Đồng.
+- An exact code match comes first. The other results are in name order.
+- The picker marks a currency that is already in the list and does not add it twice.
+- The user can select several currencies before Add. The app adds them in selection order.
+- The number of currencies has no limit.
+- A currency with no rate stays in the list, labeled "Rate unavailable".
+- Offline, the picker uses the saved catalog.
 
-Fetch the catalog from [Frankfurter's currency endpoint](https://api.frankfurter.dev/v2/currencies). The live check for this plan returned 166 current currency and unit codes. This count is an observation, not a fixed product limit. Frankfurter also has archived codes, available through a separate scope. A current converter will use the default current catalog. [Catalog documentation](https://frankfurter.dev/currencies/)
+The app bundles a catalog for a visitor whose first catalog request fails. A newer saved or fetched catalog replaces it. The app requests the catalog at most once in 24 hours.
 
-“All currencies” in this app means all current codes available from Frankfurter. It does not mean every historical currency, cryptocurrency, or every currency that could exist outside the provider's coverage. Do not hard-code a short supported-currency list. Frankfurter's catalog includes some metals and other units; keep those available in a clearly named Other units group with their units shown.
+Manage currencies has Move up, Move down, and Remove buttons, and the user can drag rows into a new order. Removing a result does not change the source amount. Removing the source makes the next currency with a rate the source, with its exact converted value. One card always remains. Undo restores the row. It also restores the source and amount if nothing changed after the removal.
 
-On phones, Add currency opens a sheet or dialog that fits above the keyboard. On larger screens, use a centered dialog. Both use the same interaction:
+## Conversion
 
-- Put search at the top. Search by ISO code, currency name, and useful local aliases. Match without regard to case or accents; “dong” must find Vietnamese Đồng.
-- Put exact code matches first. Sort remaining results by name.
-- Show code, name, badge, and availability. Already-added currencies are marked and cannot be added twice.
-- Allow selection of several currencies before pressing Add. Append them in selection order. Cancel leaves the list unchanged.
-- Do not impose an arbitrary limit such as five or ten currencies. The maximum is the current catalog.
-- Show a clear empty-search result and a button to clear the search.
-- Keep catalog entries visible when a current rate is missing. Mark their rate as unavailable rather than pretending the currency is unsupported.
-- When offline, use the saved catalog. A currency with a saved rate can be added and converted. A currency with no saved rate can be added, but its amount stays unavailable until a rate arrives.
+The app gets one table of rates with USD as the base. Each conversion is:
 
-Ship a small catalog fallback, obtained from the official endpoint during development, so a new visitor can still understand the interface when the metadata request fails. Record the fallback's source date. Prefer a validated, more recent saved or fetched catalog. Refresh metadata at most once per 24 hours during normal use. Do not infer that a code is obsolete simply because its latest data date is old.
+```text
+target amount = source amount × USD-to-target rate ÷ USD-to-source rate
+```
 
-**Users will be able to manage their main list without changing its values by accident.**
+USD to USD is 1. Arithmetic uses decimals with 40 significant digits and rounds only for display. One calculation uses one table. The app does not mix it with pairs requested on their own.
 
-Manage currencies opens an edit mode with remove and move controls. Support drag reordering as a convenience, plus Move up and Move down buttons for keyboard and assistive-technology users. Save the order after a move. Do not require a long press or a swipe to discover these actions.
+Before the app uses a response, it validates the base, each code, each date, and each rate. A rate must be finite and positive. The app rejects a response with conflicting duplicate rows and ignores fields it does not know. A bad or empty response does not replace a good table.
 
-Removing a result leaves the source amount unchanged. If the source is removed, promote the next remaining currency with an available rate and preserve its exact converted value. If no remaining currency has a usable rate, preserve the list but clear the conversion and explain that rates are unavailable. Keep at least one card. Offer Undo after removal and restore the prior source and amount when Undo is used. Save changes immediately and do not move cards merely because another card becomes the source.
+A currency with no rate shows as unavailable. The app never substitutes zero or 1. If a new table has no rate for the source, the app keeps the table it has and reports the problem.
 
-**The conversion engine will use one consistent table of rates.**
-
-Fetch the latest full USD-based table from [Frankfurter's rates endpoint](https://api.frankfurter.dev/v2/rates?base=USD). The live check returned a positive rate for every current catalog code and permitted browser requests through CORS. This confirms the direct-browser approach is possible today; it is not a service-availability guarantee.
-
-Use these two API requests for the normal app:
-
-| Data | Request | Purpose |
-| --- | --- | --- |
-| Current catalog | GET /v2/currencies | Names, codes, symbols, and the selectable list. |
-| Latest rates | GET /v2/rates?base=USD | A full table for all conversions, including currencies added later. |
-
-USD is only the internal common base. The user can choose any available currency as the source without making another request. Each conversion uses:
-
-**Target amount = source amount × USD-to-target rate ÷ USD-to-source rate.**
-
-Treat USD-to-USD as 1. Use decimal arithmetic with 40 significant digits internally and round only for presentation. This gives enough precision for this reference-rate converter and avoids common binary floating-point display errors. It does not make the provider's underlying rates more accurate.
-
-Frankfurter blends reference data from official sources. A cross-rate calculated from one USD table can differ slightly from a separately requested direct pair because of source selection, dates, and rounding. Use the consistent USD table throughout one calculation; do not combine separate direct-pair responses opportunistically. [API behavior and source details](https://frankfurter.dev/)
-
-Normalize and validate all incoming data before it reaches the UI. Require the expected base, a valid code, a valid calendar date, and a finite positive rate. Reject duplicate quote entries with conflicting values. Ignore unknown metadata fields so additions to the API do not break the app. Keep the last valid table if a response is empty or structurally invalid.
-
-If a valid response is missing a target rate, show that card as unavailable. Never use zero or a one-to-one rate as a substitute. If the new response lacks the current source rate, keep the prior usable table for the active conversion and report the refresh problem. If there is no usable prior table, allow the user to select an available source. Do not silently fill a new table with arbitrary values from older tables.
-
-The rate-data adapter will be separate from the conversion functions. This lets the endpoint or response handling change later without rewriting the interface. The first version will use Frankfurter only; an automatic switch to another rate provider would change the meaning and dates of the results and is not part of this plan.
-
-**Rate refresh will be automatic and will follow the agreed one-hour rule.**
+## Rate checks
 
 | Event | Action |
 | --- | --- |
-| First visit with no saved rates | Fetch immediately and show a clear loading state. |
-| Open with saved rates | Show saved values immediately. Fetch in the background if the last successful check is at least one hour old. |
-| Return from another app or browser tab | Apply the same one-hour check. Coalesce overlapping focus and visibility events. |
-| App remains visible for more than one hour | Check once when due, so a screen left open can receive new data. |
-| Type, select another source, add a card, or reorder | Use the loaded table. Do not fetch rates for these actions. |
-| Connection returns | Retry a due or previously failed request, subject to the retry delay. |
-| App is hidden or closed | Do not poll. Do not promise background updates from the operating system. |
+| First visit | The app fetches rates and shows a loading state. |
+| Start with saved rates | The app shows the saved values first. It fetches if the last check is at least one hour old. |
+| Return to the tab or window | The app applies the same one-hour rule. |
+| The page stays open | The app checks when the hour ends. |
+| Typing, a source change, an added currency, or a reorder | The app makes no request. |
+| The connection returns | The app tries again once the retry delay has passed. |
+| The page is hidden or closed | The app makes no requests. |
 
-Use one request in progress at a time. Set a request timeout of about 10 seconds. Prevent an older response from replacing a newer table. A successful response with unchanged rate dates still counts as a successful check; otherwise the app would keep requesting data that has not changed.
+Only one request runs at a time, with a 10-second timeout. An older response cannot replace a newer table. A response with unchanged rate dates still counts as a successful check.
 
-Use a failure retry delay of 1 minute, then 5 minutes, then 15 minutes, then up to one hour, while the app is visible and online. For HTTP 429, honor Retry-After when provided; use a conservative 15-minute delay when it is absent. Reset the failure sequence after a successful response. Network events are hints; the actual request result determines whether the refresh worked.
+After a failure the app waits 1 minute, then 5, then 15, then 60. For HTTP 429 it uses `Retry-After`, or 15 minutes. Retry is available after a failure, but it cannot cut a 429 delay short.
 
-There will be no normal refresh button or pull-to-refresh feature. A failed first load can show Retry. A persistent refresh error can also offer Retry, while still respecting a provider-imposed retry delay.
+The app saves rates that arrive during an edit, but the cards do not change until the edit ends.
 
-If rates arrive during an amount-editing session, validate and save them, then queue their application until the user finishes that edit. This prevents values from changing under the user's cursor. Apply the newest pending table after the edit ends, preserve the latest source amount, and show a brief status message if the results change. Keep the displayed table's dates separate from the saved pending table's dates until application is complete.
+## Rate dates
 
-**The app will distinguish a successful check from the age of the actual data.**
+Frankfurter gives a date for each rate, and one table can hold several dates.
 
-Frankfurter returns a date per rate. In the live check for this plan, the full table contained dates from 24 to 26 September, and VND had a different date from several other currencies. Do not assign one invented date to the whole table.
+- The app keeps the date of each rate and, as a separate value, the time of the last successful check.
+- A conversion between two currencies other than USD uses two rates. The older date is the age of the result.
+- The status shows the date or date range of the visible list. About the rates shows the dates for each currency.
+- A failed check does not change the time of the last check.
+- A weekend or holiday date is not an error. A rate more than seven calendar days old gets a notice.
+- Age uses UTC calendar dates.
 
-- Keep the provider date for every rate and a separate timestamp for the last successful check.
-- For a conversion between two non-USD currencies, retain the dates of both rates used in the cross-rate. The older date is the conservative age of that result.
-- Summarize the dates used by the visible list, for example “Rate dates: 25–26 Sep”. For one date, show that date.
-- In the rate details, show both source and target dates when they differ. For USD, use the date of the other leg; the identity rate of 1 has no independent publication date.
-- Show “Checked 5 minutes ago” separately. A failed attempt does not advance the last successful-check timestamp.
-- A weekend or holiday is not automatically an error. Always show the dates. As a product rule, give a stronger old-data notice when a rate used in a visible conversion is more than seven calendar days old.
-- Compute data age from UTC calendar dates, not by converting a date-only value to local midnight and accidentally moving it to the previous day.
+About the rates says the values are reference estimates that can differ from bank, card, or cash prices. It links to Frankfurter and its terms.
 
-About rates will state that these are reference estimates and can differ from bank, card, or cash-exchange prices. Link to the data source and its terms. Review the applicable provider attribution requirements before public release. Frankfurter permits commercial use of its API, but the underlying providers' data terms still apply. [Frankfurter terms](https://frankfurter.dev/license/)
+## Offline use and storage
 
-**Offline use will keep the converter useful after an online visit.**
+After one visit with a connection, the app and the last table work offline. The status then says the app is offline and uses saved rates, and it shows the rate dates. With no saved rates, it asks the user to connect once.
 
-The PWA will save the app shell and the last usable rate table. With those saved, opening it offline will show the user's list and allow local conversion, adding currencies with known rates, removing cards, and reordering. Show “Offline — using saved rates” and the actual data dates. Do not present saved values as a live feed.
-
-Offline support requires a prior successful load of the app assets and rates. If the shell is available but no rates are saved, show the interface with “Connect once to load rates”. If the app has never been loaded, a normal website cannot be expected to open offline. Browser data removal or storage eviction can also remove saved content. [Offline PWA behavior](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Offline_and_background_operation)
-
-**Local storage will hold a small, versioned app state.**
-
-Use localStorage only for the small preferences record. Keep the catalog and rate snapshots in native IndexedDB, which has an asynchronous API. Use the service worker's Cache Storage for static app files. Read the saved catalog and rates asynchronously after drawing the HTML shell. This keeps larger serialization and storage work off the input path. localStorage is synchronous, so even its small writes must be scheduled away from active typing. [Browser storage behavior](https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API)
-
-This design needs no server database or client database package. Use a small native IndexedDB adapter with explicit error handling. If restoring saved data and receiving network data overlap, a late storage read must not overwrite a newer validated network response.
-
-| Record | Contents |
+| Data | Location |
 | --- | --- |
-| Preferences | Schema version, ordered currency codes, selected source, and saved amount or empty draft. |
-| Rate snapshot | Base currency, decimal rate values, each rate's date, response receipt time, and last successful-check time. |
-| Catalog | Codes, names, symbols, catalog receipt time, and whether it came from the bundled fallback. |
-| Temporary UI state | Search text, open dialog, cursor position, and validation messages remain in memory. |
+| The list, source, amount, and unfinished amount text | localStorage |
+| The rate table and the catalog | IndexedDB |
+| History series | IndexedDB, at most 12 series and 2 MiB |
+| App files | Cache Storage, through the service worker |
 
-Use fex:v1:preferences for the small localStorage record and a versioned fex IndexedDB database with separate rate and catalog records. Validate records on read. Keep all active calculation data in memory. Schedule preference saves after the visible change; debounce amount saves by roughly 250 ms and flush the small record on blur or pagehide. Do not write storage or serialize the full rate table in an input handler. Persist decimal values as strings. Do not save only formatted display text.
+Each record has a version, and the app validates it on every read. The app saves amounts as decimal strings. It saves 250 ms after a change, and without delay when an edit ends or the page hides. An input handler never writes to storage.
 
-If storage is blocked, full, or corrupted, keep the app usable in memory and show a small notice that changes may not be saved. Recover from invalid records without deleting unrelated site storage. Version the format and add explicit migrations when it changes.
+If the browser blocks storage, or storage is full or corrupt, the app works from memory and warns that it may not save changes. A late read from storage must not replace newer data from the network.
 
-The app will not send amounts or personal currency lists to the server. API calls request the generic USD table and catalog. The hosting provider and API still receive normal network request metadata. Do not add analytics, advertising scripts, or third-party fonts in the first version.
+Two tabs share data. A preference change in one tab reaches the others but does not replace an amount the user is editing. A tab that saves rates tells the other tabs.
 
-Preferences are local to the site origin and browser. They do not automatically move from a preview domain to the production domain, to another device, or to an installation made in another browser. Do not promise such a transfer. For two tabs on the same origin, use storage events for preference changes and BroadcastChannel, when supported, to announce a newer saved rate snapshot. A receiving tab can read that snapshot asynchronously. Without BroadcastChannel, recheck saved data when the tab becomes visible. Apply cross-tab changes when idle; do not overwrite an active amount edit. Close old IndexedDB connections on a version change so an update does not block indefinitely.
+The app sends no amounts and no currency list to any server.
 
-**Installation will be optional, and the website will remain fully usable.**
+## Installation and updates
 
-Provide a web app manifest with a stable app ID, name, short name, start URL, scope, description, standalone display mode, and colors. Include regular and maskable icons at 192 and 512 pixels, an Apple touch icon, and a favicon. Verify the maskable safe area. Serve the production site over HTTPS. [Install requirements](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable) and [icon guidance](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/How_to/Define_app_icons)
+The manifest has a stable ID, name, start URL, scope, and 192 px and 512 px icons in normal and maskable forms. The site must use HTTPS.
 
-Show Install app in the menu when the browser provides an install event. Only trigger the browser prompt after the user selects it. On iOS, provide concise Add to Home Screen instructions. Hide installation guidance in standalone mode and do not show repeated promotional banners. Installation controls vary by browser, so use feature detection. The converter must also work in browsers that cannot install it.
+The menu shows Install Fex only when the browser can install the app. On iOS it shows the Add to Home Screen steps. An installed app hides the item. The converter works in browsers that cannot install it.
 
-Use a generated, versioned service worker through vite-plugin-pwa. Precache the HTML shell, compiled scripts, styles, icons, and local badges. Use the application's own rate-storage policy for the API; do not place a second opaque API cache in the service worker that could make old responses look newly fetched.
+The service worker is `src/pwa/sw.js`, and the build adds the list of files to it. The worker saves the page, scripts, styles, icons, and badges, and serves them from its cache before the network. It does not save API responses.
 
-An app-code update and a rate update are separate events. When a new app version is ready, show “Update available” with Update and Later. Save the draft before an accepted reload. Do not force a reload while the user types. Remove obsolete app caches after the new version activates, while keeping user preferences and rate data. Use backward-compatible storage migrations so an older open tab does not corrupt state. [PWA update behavior](https://vite-pwa-org.netlify.app/guide/service-worker-strategies-and-behaviors)
+A new app version waits until the user selects Update. The app saves the current amount text before the reload. The worker deletes old caches once no open tab uses them. It keeps preferences and rates.
 
-**The app will use plain HTML, CSS, and JavaScript with no UI framework.**
+## Technology
 
-This screen has a small and well-defined state model. Native elements and focused DOM updates are a suitable fit. Use semantic HTML, ordinary inputs and buttons, native dialog elements, HTML templates for repeated cards, and JavaScript ES modules. Keep the source as JavaScript; use JSDoc types and development-time checking to catch errors without requiring TypeScript application files.
-
-| Layer | Proposed choice | Reason |
-| --- | --- | --- |
-| UI | Semantic HTML, CSS, and plain JavaScript modules | Small startup code and direct control of DOM updates. |
-| Build | Vite with its vanilla JavaScript setup | Bundles and minifies production files; adds no UI framework runtime. |
-| Styles | Plain CSS with design variables | Enough for the reference screen without a component framework. |
-| Arithmetic | decimal.js-light | Decimal calculations with controlled precision and display rounding. |
-| HTTP | Browser fetch and AbortController | No HTTP client package or secret API key needed. |
-| Storage | Small localStorage preferences, native IndexedDB, and Cache Storage | Keep rate storage asynchronous and static app assets available offline. |
-| PWA build | vite-plugin-pwa / Workbox | Asset precaching and a controlled update lifecycle. |
-| Unit and UI tests | Vitest, a DOM test environment, and DOM Testing Library if useful | Verify domain functions and native-element interaction. |
-| Browser tests | Playwright | Exercise mobile layouts, storage, errors, and service-worker behavior. |
-| Hosting | GitHub Pages | Static publication from the public repository; a custom domain can be added later. |
-
-The only proposed production dependency is decimal.js-light for decimal arithmetic. It is not installed by this plan. Obtain confirmation before installing it, as required by the workspace rules. There will be no React, react-dom, virtual DOM, hydration step, UI component package, client router, or global state package. Build, PWA generation, type-check tooling, and tests are development dependencies. Account for generated service-worker code in the asset budget even though its generator is a development tool. Use pnpm and commit the pnpm lockfile when implementation work is authorized. Select compatible current stable versions at that point.
-
-Vite is only the development and build tool. The published result is static HTML, CSS, JavaScript, and PWA assets. It can be served from a compatible static host. [Vite production builds](https://vite.dev/guide/build)
-
-Keep currency parsing, calculations, formatting, response validation, refresh policy, and storage independent of DOM code. Use a single object argument for functions that need several inputs. There is no need for a backend framework, API proxy, scheduled server job, authentication provider, or server database in this first version.
-
-Keep one explicit state object and small action functions for edits, source changes, list changes, and rate updates. Each action updates the affected native elements. Keep a map from currency code to its existing card and input nodes. Create or remove a card only when the list changes; move the existing node when its order changes. Use textContent for API-provided labels. Do not build HTML strings from remote names.
-
-For an amount edit, parse the source once, prepare the common-base value once, and update only the dependent amount fields that have changed. Leave the active input node and its text alone. Unit-rate labels do not need recalculation on every keystroke because the rates and source currency have not changed. Cache decimal rate objects, number formatters, and normalized search text. Batch DOM writes without interleaving layout reads. Coalesce additional visual work in the next animation frame when needed; do not debounce the user's visible input response.
-
-| Planned area | Responsibility |
+| Layer | Choice |
 | --- | --- |
-| index.html | Visible app shell, semantic controls, loading state, card template, and dialog structure. |
-| src/app | Plain JavaScript state, actions, source selection, and lifecycle coordination. |
-| src/ui | Small DOM modules for cards, picker, list management, rate status, install help, and update notice. |
-| src/domain | Amount parser, decimal conversion, formatting, and data models. |
-| src/data | Frankfurter adapter, validation, catalog fallback, and refresh coordinator. |
-| src/storage | Versioned records, migrations, and cross-tab handling. |
-| src/pwa | Registration, install detection, and app-update handling. |
-| public | Icons, badges, static metadata, and hosting headers. |
-| tests | Unit, component, browser, and offline/update fixtures. |
-| Project documents | Setup, deployment, source terms, and maintenance instructions. |
+| UI | HTML, CSS, and JavaScript modules, with native inputs, buttons, and `dialog` elements and no UI framework |
+| Types | JSDoc comments that TypeScript checks |
+| Build | Vite |
+| Arithmetic | decimal.js-light, the only runtime dependency |
+| Network | `fetch` and `AbortController` |
+| PWA | vite-plugin-pwa, which adds the file list to the worker and writes the manifest |
+| Tests | Vitest and Playwright |
+| Hosting | GitHub Pages, as [deployment](docs/DEPLOYMENT.md) describes |
 
-Expose clear pnpm scripts for development, build, JSDoc/JavaScript type checks, lint, unit tests, browser tests, and performance checks. Provide one combined check command for the complete release gate. Run browser and performance tests against the production build; a development server alone is not sufficient.
+Parsing, calculation, formatting, validation, the rules for rate checks, and storage do not touch the DOM. A function with many inputs takes one object.
 
-**Accessibility and mobile behavior are release requirements.**
+The app keeps a map from each currency code to its card. It creates or removes a card only when the list changes, and moves a card when the order changes. Text from the API enters the page as text, never as HTML.
 
-- Give every input a label that includes the currency name and code. Expose which currency is the source.
-- Keep focus visible. Use at least 44 by 44 CSS-pixel touch targets and input text large enough to avoid unwanted mobile zoom.
-- Use a real dialog pattern for the picker: focus stays inside while open, Escape closes it, and focus returns to the trigger. A screen reader must be able to search and add currencies.
-- Provide keyboard alternatives for list reordering and removal. Keep DOM order and visual order consistent.
-- Announce errors and completed refreshes politely. Do not announce every changed result on each keystroke.
-- Maintain readable contrast and respect reduced-motion preferences. Do not rely on animation to explain a change.
-- Account for display cutouts, bottom safe areas, browser bars, and the virtual keyboard. The current amount and dialog actions must stay reachable.
-- Keep long currency names and large values inside their cards. Permit horizontal scrolling within a focused long number field rather than shrinking it to unreadable text.
+On each keystroke the app writes only to the fields that changed. It leaves the focused field, the unit-rate lines, and storage alone.
 
-**The site can use a custom domain without changing the existing website.**
+## Accessibility and mobile
 
-The recommended first deployment is a dedicated subdomain such as a user-chosen currency-app subdomain. The existing main website can link to it. A standalone custom domain also works. The final hostname remains a launch choice; do not assume ownership of any example domain.
+- Each amount field has a label with the currency code and name, and assistive technology can tell which card is the source.
+- Focus is visible. Touch targets are at least 44 by 44 CSS pixels.
+- Dialogs keep focus inside, close with Escape, and return focus to the control that opened them.
+- Reordering and removal work with the keyboard.
+- A screen reader announces errors and completed rate checks without interrupting. It does not announce results on each keystroke.
+- The app drops animation when the system asks for reduced motion.
+- The layout allows for display cutouts, safe areas, and the on-screen keyboard.
+- Long names and large values stay inside their cards.
 
-The initial host will be GitHub Pages for the public `poltak/fex` repository. Build the project site for `/fex/`. The Pages workflow will read the configured base path, so a later custom domain can use the correct root path. No app server, account system, or paid exchange-rate plan is required.
+## Tests
 
-The user will enable GitHub Actions as the Pages source, then run the first publication workflow. Later pushes to `main` can publish after checks pass. The workflow must not enable Pages itself. A later custom domain and its DNS settings are separate decisions; preserve existing site and mail records. Cloudflare Pages remains an optional static host described in the deployment guide.
+- Conversion tests cover identity, cross rates, source changes without rounding drift, and a fixed source amount across a rate check.
+- Precision tests cover zero, large and tiny values, minor units, and display rounding.
+- Input tests cover empty and incomplete text, invalid text, locale separators, limits, cursor position, and keys.
+- List tests cover search, adding several currencies, removing the source, Undo, and keyboard reordering.
+- API tests cover malformed data, conflicting rows, missing rates, timeouts, HTTP 429, and responses that arrive out of order.
+- Rate check tests cover the one-hour rule, one request for events that arrive together, retry delays, and rates that arrive during an edit.
+- Storage tests cover reload, corrupt records, blocked storage, a second tab, and a database that does not respond.
+- Offline and PWA tests cover offline reload, updates and rollback with unfinished text, and scope.
+- Layout tests cover 320 px, desktop, long names, and large numbers.
 
-If the preferred address is instead a path on the existing site, such as /fex/, inspect that site's hosting first. The asset base, manifest ID, start URL, navigation fallback, and service-worker scope must all use that path. The service worker must not control or clear caches for the rest of the site. This is an alternative deployment layout, not an automatic change to the current website.
+Tests use fixed API responses. `pnpm run test:live` checks the live API on its own.
 
-Configure a canonical production URL, page title, description, social-preview metadata, and appropriate preview noindex behavior. Keep HTTPS and certificates valid. Use restrictive security headers compatible with the app, including a content security policy that permits requests to Frankfurter and locally served assets. Avoid caching the service-worker script as an immutable asset; use hashed filenames for immutable compiled assets. Test the actual deployed headers.
+Installation, offline start, and the keyboard need a check on a physical Android phone and iPhone. Browser emulation does not prove them.
 
-Create a Git repository when implementation is approved. Keep work in reviewable commits. Configure CI to run checks, create a preview build, and deploy production only after the release gate passes. Keep the prior production deployment available for rollback. Verify any rollback against an already-installed PWA as well as a new browser session, because the service worker can otherwise keep the previous app version active.
+## Performance limits
 
-**Tests will cover the behavior that can make a converter wrong or difficult to use.**
+Measure the production build, and record the browser, CPU setting, network profile, and number of cards.
 
-| Test group | Required evidence |
+| Measure | Limit |
 | --- | --- |
-| Conversion | Identity conversion, known cross-rates, every supported rate in a fixture, source switching, repeated switching without display-rounding drift, and preservation of the entered source amount on refresh. |
-| Precision | Zero, large values, tiny nonzero values, different currency minor units, display thresholds, and decimal rounding. |
-| Input | Empty and incomplete drafts, invalid paste, locale separators, allowed limits, cursor preservation, and keyboard actions. |
-| Currency list | Search by code and name, accent-insensitive matches, multi-add order, duplicates, add-all performance, removal of the source, Undo, and keyboard reorder. |
-| API handling | Valid data, malformed data, conflicting duplicates, missing rates, empty responses, timeouts, network failures, HTTP 429, and out-of-order responses. |
-| Refresh | Fake-clock tests before and after one hour, one request for overlapping lifecycle events, hidden-tab behavior, retry delays, unchanged rate dates, and pending updates during editing. |
-| Dates | Mixed per-currency dates, a USD identity leg, local timezone boundaries, weekend data, and the seven-day notice. |
-| Persistence | Reload restoration, corrupt records, blocked localStorage/IndexedDB, asynchronous restore races, schema migration, a second tab, and no overwrite of an active edit. |
-| Offline | Online load followed by a real offline reopen, offline conversions, adding a cached currency, unavailable rates, and reconnection. |
-| PWA | Manifest and icon validity, correct scope, standalone layout, service-worker activation, code update during a draft, and rollback behavior. |
-| Accessibility | Keyboard use, dialog focus, readable labels, contrast, zoom, reduced motion, and meaningful status announcements. |
-| Layout | 320 px and common phone widths, wide desktop, landscape, long names, large numbers, and an open virtual keyboard. |
+| Initial JavaScript | 25 KiB gzip |
+| Offline installation, which is every file the worker saves plus the worker | 75 KiB gzip |
+| First visible page on a cold start | 1.5 s on the test profile. The page does not wait for rates. |
+| Controls ready on a cold start | 2 s on the test profile |
+| Repeat visit with saved files and rates | 500 ms to a usable converter |
+| Typing with eight cards | 50 ms at the 95th percentile |
+| Opening the picker, searching, or changing the source | 100 ms at the 95th percentile |
+| Typing with the full catalog | 100 ms at the 95th percentile, with no repeated task longer than 50 ms |
+| Chart with saved data | 100 ms to open and 100 ms to draw five years |
+| Layout shift | 0.05 in the test flow |
 
-Use deterministic recorded fixtures for normal tests. Do not make the whole test suite depend on current market values or an external API being online. Run a separate live smoke check before release that verifies current schema, positive rates, CORS, and coverage for the initial list.
+`pnpm run check` fails if the build exceeds the first two limits, or if a Chromium lab run is slower than the others. [Verification](docs/VERIFICATION.md) has the results. A lab run is not a measurement on a phone.
 
-Use Playwright for Chromium, Firefox, and WebKit browser behavior. Confirm installation, keyboard layout, offline launch, and app updates on an actual Android Chrome device and an actual iPhone when available. Emulated mobile browsers and Playwright WebKit are useful checks, but do not constitute proof of an installed iOS or Android PWA. State which device checks remain unverified if devices are unavailable.
+## Release condition
 
-**Startup and interaction speed will have explicit budgets and measurements.**
-
-These are implementation targets, not measurements of an app that already exists. Check them on the production build and record the device, browser, CPU setting, network profile, selected-currency count, and cold or warm cache state. Use a repeatable mobile lab profile for CI trends and a representative physical phone for actual interaction results. Keep external API latency separate from app rendering time.
-
-| Measure | Initial release target |
-| --- | --- |
-| Initial static JavaScript | At most 25 KiB gzip, including the converter code loaded before the first screen is ready. |
-| Complete offline installation | At most 75 KiB gzip for every unique service-worker precache asset plus the worker. Include the lazy chart code, badges, and install icons once each. Exclude rate and catalog API responses. |
-| Cold first visible shell | Within 1.5 seconds on the agreed mobile test profile. The shell must not wait for the rate API. |
-| Cold controls ready | Within 2 seconds on that profile. A first-time rate request may still be pending and must say so. |
-| Repeat open with saved assets and rates | Useful converter within 500 ms on the representative phone, without waiting for network refresh. |
-| Typing and dependent-value update | 95th percentile under 50 ms with the default eight cards. Aim for the next display frame in ordinary use. |
-| Open picker, search, and change source | Visible response within 100 ms at the 95th percentile. No first-use network requirement for the picker. |
-| Full-catalog list | Input response under 100 ms at the 95th percentile, with no repeated main-thread task over 50 ms. |
-| History chart | Cached chart opening and rendering a five-year series target under 100 ms after the module and data are ready. Measure network loading separately. |
-| Layout stability | No unexpected shift when rates, badges, or status messages arrive; target CLS at or below 0.05 in the test flow. |
-
-Draw the app shell from HTML immediately. Read the tiny preferences record once, restore saved rates asynchronously, and start any due network work independently. The currency list must not wait for catalog refresh, installation checks, or remote fonts. Reserve badge and status space so loading does not shift controls.
-
-Keep the main picker controls and search code in the small initial bundle so the first tap is fast. Load saved metadata asynchronously and use the bundled fallback when needed. Defer nonessential icon downloads and service-worker registration until after the first screen can render. Use system fonts, small local SVG badges, and short opacity or transform transitions. Avoid large blur effects and unnecessary background animation.
-
-Use cache-first delivery for a versioned, already-installed app shell, with a separate check for code updates. The rate refresh remains independent. Reopening the PWA must not wait for a service-worker network timeout before showing cached HTML.
-
-For the full-catalog case, first measure the simple implementation. Reuse row nodes and skip writes when text is unchanged. If the long list exceeds the budget, calculate from one immutable source value and schedule off-screen row formatting in bounded batches; mark rows dirty and bring them current before they become visible. Preserve accessibility, keyboard navigation, and calculation consistency. Add virtualization only if measured results require it, and do not add a production package without confirmation.
-
-Add build-size checks to CI. Use browser performance marks around restoration, amount edits, picker opening, and filtering. Capture repeated runs and inspect long tasks, layout work, and memory after repeated dialog use. Browser tests must also prove that typing does not fetch, write a full snapshot to storage, replace the focused input, or rebuild the whole list. A Lighthouse score is useful supporting evidence, not a substitute for measured typing, picker, and warm-open behavior.
-
-**Implementation will proceed in six reviewable stages.**
-
-| Stage | Work | Completion check |
-| --- | --- | --- |
-| 1. Project and domain logic | Create the vanilla JavaScript project, confirm the decimal-arithmetic dependency, set up JSDoc checks/build/tests, and implement parsing, conversion, and formatting. | Deterministic calculation and input tests pass; the initial bundle budget is in CI. |
-| 2. Main screen | Build the reference-style HTML cards, direct DOM updates, source selection, and responsive layout. | All initial rows work with fixtures; typing and focus stay stable; interaction timing is measured. |
-| 3. Full catalog and local state | Add search, multi-add, management, saved preferences, and recovery from bad storage. | A user can build and restore any supported list; no duplicates or rounding drift. |
-| 4. Live rates | Add the Frankfurter adapter, rate dates, automatic refresh, retries, missing-data states, and editing-safe refresh application. | Live smoke check and deterministic failure/lifecycle tests pass. |
-| 5. PWA, accessibility, and performance | Add manifest, icons, offline assets, update handling, install help, and keyboard/screen-reader refinements; tune startup and interaction paths. | Production-build offline, update, size, and timing gates pass; device checks are recorded. |
-| 6. Public release | Deploy a preview, complete browser/device review, connect the chosen domain, verify headers and source credits, then publish. | Public HTTPS works with no login; live, saved, and installed behavior is checked on the final hostname. |
-
-The finished handoff will include the source code, lockfile, tests, build and release scripts, icons, PWA configuration, setup instructions, deployment instructions, source-credit notes, and a short record of what was verified locally, in CI, on devices, and on the live domain. No sub-agents are required for this work.
-
-**The app is ready for release only when the complete user flow works.**
-
-A new visitor must be able to open the public URL, see the initial list, edit any amount, search the full current catalog, add and arrange currencies, and return later to the same saved list. With saved data, the same conversions must work offline. A one-hour-due refresh must update results without changing the source amount or interrupting input. Every visible result must use a valid rate and an honest date. Installation must preserve the simple screen and use the correct domain and scope. The measured production build must meet the startup, interaction, and asset-size budgets, or the remaining gap must be resolved before release.
-
-The app name and decimal-arithmetic dependency are approved. The repository and GitHub Pages workflow are selected. A custom domain can wait. The app does not include accounts, transfers, arbitrary date entry, rate alerts, fees or spread adjustment, cryptocurrency feeds, advertising, or cloud sync. The five fixed history periods are reference-rate views, not intraday prices or transaction quotes.
+A new visitor can open the site, see the first list, edit an amount, search the full catalog, add and arrange currencies, and find the same list on the next visit. With saved data, the same conversions work offline. A rate check updates results without changing the source amount or interrupting an edit. Every visible result uses a valid rate and shows its date. The build meets the limits above.

@@ -1,93 +1,91 @@
 # Fex
 
-Fex is a public currency converter with Convert and Currency history screens. It uses plain HTML, CSS, and JavaScript, has no account system or app server, and uses `decimal.js-light` for decimal arithmetic. Vite builds the static site and its PWA assets.
+Fex is a currency converter that runs in the browser. It has a Convert screen and a history chart for one currency pair. The app is plain HTML, CSS, and JavaScript with one runtime dependency, `decimal.js-light`. It has no account, no server, and no API key. Vite builds the static site and its service worker.
 
-Edit any currency card to make it the source. Other cards update on the device. Add currencies from the current Frankfurter catalog, change their order, and save the list in the browser. Open Currency history from the navigation or a currency card to chart one pair. The initial list is VND, USD, EUR, SGD, AUD, THB, GBP, and IDR, with USD 10 as the source.
+Edit the amount on a card and that currency becomes the source. The other cards update on each keystroke. You can add currencies from the Frankfurter catalog, reorder them, and remove them. The browser keeps the list, the source, and the amount. The first list is VND, USD, EUR, SGD, AUD, THB, GBP, and IDR, with USD 10 as the source.
+
+The live site is <https://poltak.github.io/fex/>.
 
 ## Run locally
 
-Use Node.js 24.15 or later on the Node 24 line, or Node 22.22.2 or later on the Node 22 line. Use pnpm 11.25.0, as pinned in `package.json`, and the committed pnpm lockfile.
+Use Node.js 22.22.2 or later on the 22 line, or 24.15 or later. Use pnpm 11.25.0.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm run dev
 ```
 
-Open the URL printed by Vite. No API key or environment file is required. The development server does not register the production service worker.
+Open the address that Vite prints. The development server does not register the service worker.
 
-## Build and check
+## Check
 
 ```sh
 pnpm exec playwright install --with-deps chromium firefox webkit
 pnpm run check
 ```
 
-The check runs JavaScript type checks, lint, unit tests, the production build, the bundle size gate, Playwright behavior tests in Chromium, Firefox, and WebKit, and a separate Chromium performance suite. Run `pnpm run test:performance` to repeat the performance suite by itself after a build. Browser tests use controlled API responses. They do not require current market values. On Linux, the browser installation command also installs the required system packages.
+`check` runs these steps in order: type check, lint, unit tests, production build, size limits, browser tests in Chromium, Firefox, and WebKit, and a Chromium performance suite. The browser tests use fixed API responses and need no network.
 
-To inspect a production build:
+| Command | Purpose |
+| --- | --- |
+| `pnpm run build` | Builds the site into `dist/`. |
+| `pnpm run preview` | Serves `dist/` at `http://127.0.0.1:4173`. |
+| `pnpm run check:size` | Fails if the initial JavaScript exceeds 25 KiB gzip or the offline installation exceeds 75 KiB gzip. |
+| `pnpm run test:performance` | Runs the performance suite again after a build. |
+| `pnpm run test:live` | Reads the live Frankfurter API and checks its schema, the first list, and its CORS headers. `FEX_SMOKE_ORIGIN` sets the origin to check. The script sends no amount. |
+| `pnpm run icons` | Regenerates the install icons after a change to the mark in `scripts/icons.mjs`. A build does not run this script. |
 
-```sh
-pnpm run build
-pnpm run preview
-```
+## Deployment
 
-Open `http://127.0.0.1:4173`. Build output is in `dist/`. Run `pnpm run check:size` after a build to check the limits of 25 KiB gzip for initial static JavaScript and 75 KiB gzip for the complete offline installation. The latter counts every unique service-worker precache asset once, plus the service worker. These size checks do not replace measured startup and input timing on a phone. See the [local verification record](docs/VERIFICATION.md).
+The Check and deploy workflow runs the full check on each pull request and each push to `main`. After a push to `main` it builds for the GitHub Pages path and deploys. [Deployment](docs/DEPLOYMENT.md) covers the Pages setup, other hosts, and rollback.
 
-The **Check and deploy** workflow runs the full check on pull requests and pushes to `main`. A manual run on any branch runs the check. Only a run on `main` reads Pages settings and can deploy. The workflow runs `pnpm run check` once. A main run then makes a separate build for the Pages base path. This build does not run the test suite again. A local check does not show that CI ran. CI requires a workflow run.
-
-Run the read-only live API check separately:
-
-```sh
-pnpm run test:live
-```
-
-Set `FEX_SMOKE_ORIGIN=https://your-domain.example` to inspect CORS response headers for a planned origin. The default is `https://example.com`. The check validates catalog, latest rates, a one-week USD/VND history response, initial-list coverage, dates, and CORS headers. It sends no amount. It is not part of the deterministic check and does not replace a request from the deployed browser.
-
-## GitHub Pages
-
-The repository includes a deployment workflow for `poltak/fex`. Open [Settings → Pages](https://github.com/poltak/fex/settings/pages), set **Source** to **GitHub Actions**, then open **Actions → Check and deploy → Run workflow** and run it once on `main`. Later pushes to `main` deploy automatically. The default public URL is `https://poltak.github.io/fex/`; it is not confirmed live until deployment succeeds.
-
-If Pages is still disabled, a run on `main` builds for `/fex/` and explains the required setting in its summary. It skips deployment and does not enable Pages through the API. Once enabled, the workflow reads the Pages base path, including a later custom-domain configuration. GitHub Pages supports public repositories on GitHub Free, so a paid host is not required. GitHub Pages ignores `_headers`; the Cloudflare header policy is not applied there. See [deployment steps and limits](docs/DEPLOYMENT.md).
+GitHub Pages ignores `public/_headers`, so the build also puts the content security policy in the HTML.
 
 ## Data and privacy
 
-The browser requests the current currency catalog and latest USD rate table from Frankfurter. It requests historical rates only when Currency history opens or the selected pair or period changes. Requests contain a currency pair and dates, never an entered amount or the converter's selected list. Conversion, parsing, formatting, and source changes run locally. The host and API provider can still receive normal request metadata, such as an IP address. The app has no analytics integration.
+The browser requests three things from [Frankfurter](https://frankfurter.dev/): the currency catalog, the latest USD rate table, and the daily history of a pair when the chart shows it. A request contains currency codes and dates. It never contains an amount or the user's list. The browser does all conversion. The app has no analytics. The host and the API see normal request data such as an IP address.
 
-The bundled catalog contains 166 codes from the official endpoint, recorded on 26 September 2026. That is a fallback snapshot, not a permanent limit on the live catalog. Rates are not bundled. A new offline visit cannot calculate conversions without saved rates. See [data sources and rate dates](docs/DATA_SOURCES.md).
+`src/catalog.js` holds a catalog of 166 codes from 26 September 2026, which the app uses until the first catalog response arrives. The app bundles no rates, so a first visit without a connection cannot convert. [Data sources](docs/DATA_SOURCES.md) explains the calculation, the rate dates, and the rules for rate checks.
 
-| Browser storage | Name | Content |
+| Storage | Name | Content |
 | --- | --- | --- |
-| localStorage | `fex:preferences:v1` | Ordered codes, source, canonical amount, and an optional raw invalid or incomplete draft. |
-| IndexedDB | Database `fex-cache`, version 1; store `cache`; keys `rates`, `catalog`, and `history:v1:<base>:<quote>:<from>:<to>` | Validated current rates, currency metadata, and bounded historical series with their check times. |
-| localStorage | `fex:chart-settings:v1` | Last selected history pair and period, separate from converter preferences. |
-| BroadcastChannel | `fex:cache:v1` | Notices that another tab saved rates; no amount payload. |
-| Cache Storage | `fex-shell:<scope pathname>:<build ID>` | Static assets for that app build and scope. |
+| localStorage | `fex:preferences:v1` | The currency order, the source, the amount, and the raw text of an amount that is not yet valid. |
+| localStorage | `fex:chart-settings:v1` | The last chart pair and period. |
+| IndexedDB | Database `fex-cache`, store `cache`, keys `rates`, `catalog`, and `history:v1:<base>:<quote>:<from>:<to>` | The current rates, the catalog, and at most 12 history series. |
+| BroadcastChannel | `fex:cache:v1` | A notice that tells other tabs about newly saved rates. |
+| Cache Storage | `fex-shell:<scope>:<build ID>` | The app's files for one build. |
 
-Saved records have schema versions. Invalid records are ignored. If storage fails, the current session can use memory; persistence is not guaranteed. Preferences use storage events between tabs. Fresh rates wait until editing ends before they replace displayed rates. Browser data is local to its origin: moving to another domain does not move saved choices. Root and `/fex/` builds on the same origin share the preference and IndexedDB names above.
+Each saved record has a version, and the app ignores a record that fails validation. If the browser blocks storage, the app works from memory and shows a notice. Browsers keep saved data per origin, so a different domain starts with an empty list.
 
 ## Offline use, installation, and updates
 
-Open a production build online first so it can save the app shell and rates. Saved conversions then work offline. Historical periods that were loaded and saved can also open offline; a period with no saved coverage needs a connection. The catalog can remain visible without a rate; that currency stays unavailable until a valid rate arrives. Clearing browser data removes offline data. A browser can also remove stored data when space is limited.
+Open the site once with a connection. After that, the app and the saved rates work offline. A chart period works offline only after the chart has shown it once.
 
-Installation uses the browser's PWA support. Where the browser supplies an install prompt, use the app's Install control. On iPhone, use Safari's Share menu and Add to Home Screen. Installation needs a secure origin, except for local development allowances. Availability depends on the browser.
+Where the browser offers an install prompt, the menu shows Install Fex. On iPhone and iPad, the menu gives the steps for Safari's Share menu.
 
-A new app version waits for acceptance before it activates. The app saves the current draft before accepting an update. Rate refresh and app code updates are separate. See [deployment, update, and rollback steps](docs/DEPLOYMENT.md).
+A new version of the app waits until the user accepts it. The app saves the current amount text before it reloads. Rate checks and app updates do not depend on each other.
 
-The PWA browser suite checks root and `/fex/` builds in separate cases. Chromium and Firefox pass offline reopening. All three engines pass code updates and rollback without losing a draft. Two WebKit offline-navigation cases are skipped because the runner returns an internal navigation error, including in a persistent profile. Safari/iOS offline launch remains unverified. Physical Android Chrome and iPhone installation checks also remain pending. A Playwright phone viewport or WebKit test is not proof of an installed mobile PWA. Final-domain HTTPS, headers, API access, installation, offline restart, updates, and rollback remain pending until deployment is completed.
+## Not yet verified
 
-## Main files
+- Offline start in Safari. The WebKit test runner cannot load a page offline, so Playwright skips three tests.
+- Installation, offline start, and input timing on a physical Android phone and iPhone.
+- The data providers' terms and credits, which [data sources](docs/DATA_SOURCES.md) describes.
+
+[Verification](docs/VERIFICATION.md) has the current test and performance results.
+
+## Files
 
 | File | Responsibility |
 | --- | --- |
-| `src/app.js` | Cards, picker, input events, and app lifecycle. |
-| `src/chart.js` | History screen, pair controls, chart rendering, and point selection. |
-| `src/history.js`, `src/history-data.js` | Date ranges, history validation, requests, and cached series. |
-| `src/domain.js` | Decimal conversion, parsing, formatting, and rate dates. |
-| `src/data.js` | API validation, refresh timing, retries, and pending rate updates. |
-| `src/storage.js` | Preferences, IndexedDB, and notices between tabs. |
-| `src/catalog.js` | Default list and official fallback catalog. |
-| `src/pwa/` | Service worker registration, installation, and static asset cache. |
-| `tests/` | Unit and browser tests. |
-| `APP_PLAN.md` | Product scope, targets, and release requirements. |
-
-Enable GitHub Pages when you are ready to publish. A custom domain can wait; the initial project address is `https://poltak.github.io/fex/`.
+| `index.html`, `src/style.css` | The page structure, the dialogs, the card template, and the styles. |
+| `src/app.js` | Cards, amount editing, dialogs, screen navigation, and page lifecycle. |
+| `src/domain.js` | Amount parsing, decimal conversion, and number formatting. |
+| `src/data.js` | Frankfurter requests, response validation, and the controller for rate checks. |
+| `src/storage.js` | Preferences, the IndexedDB cache, and notices between tabs. |
+| `src/picker.js` | The currency list that the Add dialog and the chart share. |
+| `src/chart.js` | The chart screen, with its pair controls, SVG drawing, and point selection. The app loads this file when the chart opens. |
+| `src/history.js`, `src/history-data.js` | Chart date ranges, history validation, history requests, and the saved series. |
+| `src/catalog.js` | The first list and the bundled catalog. |
+| `src/pwa/` | The service worker, its registration, installation, and the update notice. |
+| `tests/` | Vitest unit tests and Playwright browser tests. |
+| `APP_PLAN.md` | Product rules and performance limits. |

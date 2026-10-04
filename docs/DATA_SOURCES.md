@@ -1,49 +1,55 @@
 # Data sources and rate meaning
 
-Fex uses [Frankfurter v2](https://frankfurter.dev/) for reference exchange rates and currency metadata. Credit: Frankfurter, by Line of Flight, with underlying data from its listed central banks and other official providers. Fex is an independent application. It does not imply endorsement by Frankfurter or a provider.
+Fex gets reference exchange rates and currency names from [Frankfurter v2](https://frankfurter.dev/). Frankfurter is by Line of Flight and uses data from the central banks and other official providers that it lists. Fex is independent of Frankfurter and of those providers.
 
-## Requests and catalog
+## Requests
 
-| Purpose | Endpoint |
+| Purpose | Request |
 | --- | --- |
-| Current currency catalog | [Currency metadata](https://api.frankfurter.dev/v2/currencies) |
-| Latest USD reference table | [USD rates](https://api.frankfurter.dev/v2/rates?base=USD) |
-| Historical pair for a selected period | `GET /v2/rates?base=USD&quotes=VND&from=YYYY-MM-DD&to=YYYY-MM-DD` |
+| Currency catalog | `GET https://api.frankfurter.dev/v2/currencies` |
+| Latest table, USD base | `GET https://api.frankfurter.dev/v2/rates?base=USD` |
+| History of one pair | `GET https://api.frankfurter.dev/v2/rates?base=USD&quotes=VND&from=YYYY-MM-DD&to=YYYY-MM-DD` |
 
-These are direct browser GET requests. The historical request uses the chosen base, quote, and inclusive UTC date bounds. It returns daily observations that exist in the provider's data; it does not add missing dates or represent intraday prices. The converter does not request history at startup or when the user edits an amount. The chart requests only its selected pair and period. No entered amount or converter currency list is sent.
+The browser sends these requests itself, with no proxy. They contain no amount and no part of the user's list. The history request has the chart's pair and inclusive UTC dates. Its response holds the daily observations the provider has. It has no values for missing days and no prices within a day. The app requests history only for the chart, never at startup or during an edit.
 
-Run `node scripts/smoke-live.mjs` for a read-only live schema and coverage check. It uses the production validators and prints catalog and rate counts, the supported initial list, a one-week historical pair check, the rate-date span, and CORS response headers. `FEX_SMOKE_ORIGIN` changes the request's Origin header. This Node check does not establish that a final deployed browser can connect. It remains separate from the deterministic unit, behavior, and performance suites.
+`src/catalog.js` holds the catalog as it was on 26 September 2026. It has 166 codes with names and symbols, and no rates. The app prefers a saved or fetched catalog and requests a new one after 24 hours. The provider's catalog can change. It includes some metals and other units, which Fex lists as Other supported units. A code with no usable rate stays visible but gives no conversion.
 
-The fallback catalog in `src/catalog.js` contains 166 current codes, recorded from the official currency endpoint on 26 September 2026. It contains names and symbols, not exchange rates. The app uses saved or fetched metadata when available and checks for new metadata after 24 hours during normal use. The current provider catalog can grow or change. It includes some metals and other units as well as currencies. Fex groups these as Other units. A catalog entry with no current usable rate remains visible but cannot produce a conversion.
+`pnpm run test:live` checks the live API with the app's validators. It prints the catalog and rate counts, the rate dates, one week of USD/VND history, and the CORS headers. `FEX_SMOKE_ORIGIN` sets the `Origin` header. The check runs in Node, so it does not prove that a deployed browser can connect.
 
-## Calculation and dates
+## Calculation
 
-Each stored rate is the amount of a quote currency for one USD. USD has an identity rate of 1. For source currency `S`, target currency `T`, and source amount `A`:
+Each rate is the amount of a currency for one USD, and USD has the rate 1. For a source currency S, a target currency T, and a source amount A:
 
 ```text
 target amount = A × USD-to-T rate ÷ USD-to-S rate
 ```
 
-Fex uses decimal arithmetic and keeps the internal source value separate from the rounded display. Selecting a result as the new source preserves its unrounded value. A real edit makes the entered value authoritative. A rate refresh holds the source amount fixed.
+Fex uses decimal arithmetic and keeps the source value apart from the rounded text on the screen. When a result becomes the source, its unrounded value is the new amount. An edit makes the typed value the amount. A rate check does not change the source amount.
 
-Each currency rate retains its own provider date. Cross rates can therefore use two different dates. The rate details show the relevant dates; for a USD conversion, the other currency's date is the meaningful date. The synthetic USD identity date is not evidence of a separate market update. A displayed date range is not a claim that every currency has a quote from the same instant.
+## Dates
 
-The last check time records when Fex obtained a valid snapshot. It is separate from the rate dates. An unchanged response can advance the check time without changing the rate dates. Weekends, holidays, source schedules, and delayed publications can leave dates unchanged. Missing values are unavailable, not zero. Old rates retain their dates and can trigger a notice; fetching them again does not make them new.
+Each rate carries the provider's date. A conversion between two currencies other than USD uses two rates, so it can use two dates. About the rates shows both. For a conversion with USD, the other currency's date applies, because the USD rate of 1 has no publication date. A date range on the screen does not mean every currency has a quote from the same moment.
 
-The history chart uses Frankfurter's same rates endpoint with `quotes`, `from`, and `to` parameters. Each result is the value of one unit of the selected base in the selected quote currency. The chart's latest value and percentage change come from that historical response, because its observation dates can differ from the current USD table. The app keeps historical records in a separate, bounded cache. It reuses saved coverage for smaller periods and can show saved periods offline; a period that has not been saved needs a connection.
+The time of the last check is when Fex last got a valid table. It does not depend on the rate dates. A response with unchanged dates still counts as a successful check. Weekends, holidays, and late publication can leave a date unchanged, and a new request does not make an old rate new. A rate more than seven days old gets a notice.
 
-## Refresh and offline behavior
+The chart's latest value and percentage change come from the history response, not from the current table, because their dates can differ.
 
-The app checks rates when they are at least one hour old and the page is online and visible. Lifecycle events and a 30-second heartbeat can ask for a check; the controller prevents duplicate requests and enforces the one-hour interval. A manual retry can bypass the normal interval and ordinary retry delay, but cannot bypass an HTTP 429 cooldown.
+## Rate checks and offline behavior
 
-Requests time out after 10 seconds. Ordinary failures use delays of 1, 5, 15, and then 60 minutes. A 429 response uses its valid `Retry-After` value or a 15-minute fallback. Malformed responses and older rate dates cannot replace good data. If a response loses the active source rate, the app retains a prior usable table. On a cold start, a partial table can still make its available currencies usable.
+The app checks rates when the last check is at least one hour old and the page is online and visible. Window focus, a return to the tab, a reconnect, and a 30-second timer can each start a check. Only one request runs at a time.
 
-New valid rates are saved while an amount is being edited, but the displayed snapshot waits until editing ends. The displayed check time stays with the displayed snapshot. Saved rates support offline conversion; a first offline visit without saved rates does not. The static service worker does not cache API responses as app assets.
+A request times out after 10 seconds. After a failure the delays are 1, 5, 15, and then 60 minutes. A 429 response uses its `Retry-After` value, or 15 minutes. Retry starts a request before the hour or the delay ends, except during a 429 delay.
 
-## Terms and release review
+A malformed response, or one with older rate dates, does not replace good data. If a response has no rate for the source, the app keeps the table it has. On a first visit, a table with some rates missing still lets the other currencies convert.
 
-Read [Frankfurter's license and provider terms](https://frankfurter.dev/license/). Frankfurter's software license does not grant rights to every underlying data set. The providers' applicable terms remain relevant. Reference rates can be late, missing, revised, or blended; a blended value is not necessarily an official rate published by one institution.
+The app saves rates that arrive during an edit. The screen changes when the edit ends. Until then it shows the check time of the table on screen.
 
-The app's About rates view links to Frankfurter and its terms. Before public release, review the provider terms that apply to the data used, record any required credits, and add them where required. That review is pending; this repository does not claim that all third-party data terms are cleared.
+Saved rates work offline. A first visit with no connection cannot convert. A saved history series works offline, but a period the chart never showed needs a connection. The service worker does not save API responses.
 
-Results are reference estimates. Bank, card, transfer, and cash-exchange prices can differ because of timing, spread, and fees. The app does not provide a transaction quote or guarantee an executable exchange price.
+## Terms
+
+Read [Frankfurter's license and provider terms](https://frankfurter.dev/license/). Frankfurter's software license gives no rights to each provider's data, so the providers' terms apply. A reference rate can be late, missing, revised, or blended from several sources. A blended value may not be the official rate of any one institution.
+
+About the rates links to Frankfurter and its terms. Nobody has yet reviewed the terms of the providers whose data the app shows, or added the credits they require.
+
+Results are reference estimates. Bank, card, transfer, and cash prices can differ because of timing, spread, and fees. Fex gives no transaction quote.
