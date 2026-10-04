@@ -23,7 +23,9 @@ export default defineConfig({
   }, VitePWA({
     strategies: 'injectManifest', srcDir: 'src/pwa', filename: 'sw.js',
     injectRegister: false, registerType: 'prompt',
-    injectManifest: { globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'], globIgnores: ['social.svg'] },
+    // The plugin adds the manifest itself. The file patterns include the manifest's icons.
+    includeManifestIcons: false,
+    injectManifest: { globPatterns: ['**/*.{js,css,html,svg,png}'], globIgnores: ['social.svg'] },
     manifest: {
       id: base, name: 'Fex', short_name: 'Fex', description: 'A simple currency converter.',
       start_url: base, scope: base, display: 'standalone', background_color: '#0c0e0d', theme_color: '#0c0e0d',
