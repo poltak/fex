@@ -89,6 +89,41 @@ describe('history controller loading and cache', () => {
     expect(x.controller.getState()).toMatchObject({ phase: 'ready', record: { to: '2026-09-27' }, refreshing: false });
   });
 
+  it('cuts a broader saved series to the selected range without adding dates', async () => {
+    const bounds = getHistoryRange({ period: '1W', now: NOW });
+    const broad = record({ from: '2026-09-01', to: bounds.to, checkedAt: NOW, points: [{ date: '2026-09-02', rate: '1' }, { date: bounds.from, rate: '2' }, { date: '2026-09-24', rate: '3' }] });
+    const x = setup({ records: [broad] });
+    await x.controller.load({ base: 'USD', quote: 'EUR', period: '1W' });
+    expect(x.controller.getState().record).toMatchObject({ ...bounds, points: [{ date: bounds.from, rate: '2' }, { date: '2026-09-24', rate: '3' }] });
+  });
+
+  it('keeps the visible series and makes no request when the same fresh range loads again', async () => {
+    const bounds = getHistoryRange({ period: '1M', now: NOW });
+    const loader = vi.fn().mockResolvedValue(record({ ...bounds, checkedAt: NOW, points: [{ date: bounds.to, rate: '0.9' }] }));
+    const x = setup({ loader });
+    await x.controller.load({ base: 'USD', quote: 'EUR', period: '1M' });
+    const changes = x.changes.length;
+    await x.controller.load({ base: 'USD', quote: 'EUR', period: '1M' });
+    expect(x.changes).toHaveLength(changes);
+    expect(loader).toHaveBeenCalledOnce();
+    expect(x.storage.readHistoryRecords).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes a stale visible series without an empty loading state', async () => {
+    const clock = { value: NOW };
+    const bounds = getHistoryRange({ period: '1M', now: NOW });
+    const loader = vi.fn(async () => record({ ...bounds, checkedAt: clock.value, points: [{ date: bounds.to, rate: '0.9' }] }));
+    const x = setup({ loader, now: () => clock.value });
+    await x.controller.load({ base: 'USD', quote: 'EUR', period: '1M' });
+    x.storage.readHistoryRecords.mockResolvedValue([x.controller.getState().record]);
+    const changes = x.changes.length;
+    clock.value = NOW + 3600000;
+    await x.controller.load({ base: 'USD', quote: 'EUR', period: '1M' });
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(x.changes.slice(changes).every(state => state.record !== null && state.phase === 'ready')).toBe(true);
+    expect(x.controller.getState()).toMatchObject({ phase: 'ready', refreshing: false, record: { checkedAt: NOW + 3600000 } });
+  });
+
   it('uses cached data offline and reports offline without data for a new pair', async () => {
     const bounds = getHistoryRange({ period: '1M', now: NOW });
     const cached = record({ ...bounds, checkedAt: NOW, points: [] });
@@ -107,6 +142,21 @@ describe('history controller loading and cache', () => {
     await x.controller.load({ base: 'USD', quote: 'EUR', period: '1M' });
     expect(x.controller.getState()).toMatchObject({ phase: 'ready', record: { points: [], base: 'USD', quote: 'EUR' }, error: null, retryAt: null });
     expect(x.storage.writeHistory).toHaveBeenCalledWith(expect.objectContaining({ points: [], base: 'USD', quote: 'EUR' }));
+  });
+
+  it('starts an online load when the connection returns during an offline load of the same range', async () => {
+    const bounds = getHistoryRange({ period: '1M', now: NOW });
+    const pendingRead = deferred();
+    const loader = vi.fn().mockResolvedValue(record({ ...bounds, checkedAt: NOW, points: [] }));
+    const x = setup({ loader });
+    x.storage.readHistoryRecords.mockReturnValueOnce(pendingRead.promise);
+    const offline = x.controller.load({ base: 'USD', quote: 'EUR', period: '1M', online: false });
+    const online = x.controller.load({ base: 'USD', quote: 'EUR', period: '1M', online: true });
+    expect(online).not.toBe(offline);
+    pendingRead.resolve([]);
+    await Promise.all([offline, online]);
+    expect(loader).toHaveBeenCalledOnce();
+    expect(x.controller.getState()).toMatchObject({ phase: 'ready', record: bounds });
   });
 
   it('deduplicates the same in-flight selection', async () => {

@@ -1,85 +1,65 @@
-import { isFresh, request } from './data.js';
+import { CODE, HOUR, isFresh, request, retryDelay } from './data.js';
 import { getHistoryRange, HISTORY_PERIODS, validateHistoryRecord, validateHistoryRows } from './history.js';
 
-const HOUR = 3600000;
-const CODE = /^[A-Z]{3}$/;
-const RETRY_DELAYS = [60000, 300000, 900000, HOUR];
+// A saved interval from an earlier day can be a few days shorter or longer than today's interval.
 const PERIOD_TOLERANCE_DAYS = { '1W': 1, '1M': 4, '3M': 5, '1Y': 4, '5Y': 5 };
 
 /** @typedef {import('./history.js').HistoryRecord} HistoryRecord */
+/** @typedef {{phase:'idle'|'loading'|'ready'|'offline'|'error',record:HistoryRecord|null,error:string|null,retryAt:number|null,refreshing:boolean}} HistoryState */
 
 /** @param {{base:string,quote:string,from:string,to:string,fetchImpl?:typeof fetch,signal?:AbortSignal,now?:()=>number}} options */
 export async function fetchHistory({ base, quote, from, to, fetchImpl = fetch, signal, now = Date.now }) {
-  if (!CODE.test(base) || !CODE.test(quote) || base === quote) throw new Error('The history currency pair is invalid.');
+  // Check the request before the network call. An empty row list has only the request to check.
   validateHistoryRows({ rows: [], base, quote, from, to });
   const query = new URLSearchParams({ base, quotes: quote, from, to });
   const rows = await request({ url: `https://api.frankfurter.dev/v2/rates?${query}`, fetchImpl, signal });
-  const points = validateHistoryRows({ rows, base, quote, from, to });
   const checkedAt = now();
-  return validateHistoryRecord({ base, quote, from, to, points, checkedAt, lastUsedAt: checkedAt });
+  return { base, quote, from, to, points: validateHistoryRows({ rows, base, quote, from, to }), checkedAt, lastUsedAt: checkedAt };
 }
 
-function rangeDays({ from, to }) {
-  return (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86400000;
+function days({ from, to }) {
+  return (Date.parse(to) - Date.parse(from)) / 86400000;
 }
 
-function covers({ record, from, to }) {
-  return record.from <= from && record.to >= to;
+// The part of a saved record that is in the wanted range.
+function view({ record, from, to }) {
+  const start = record.from > from ? record.from : from;
+  const end = record.to < to ? record.to : to;
+  return { ...record, from: start, to: end, points: record.points.filter(point => point.date >= start && point.date <= end) };
 }
 
-function exactCachedView({ record, from, to, now }) {
-  return validateHistoryRecord({
-    ...record,
-    from,
-    to,
-    points: record.points.filter(point => point.date >= from && point.date <= to),
-    lastUsedAt: now,
-  });
-}
-
-function previousIntervalView({ record, from, to, now }) {
-  const actualFrom = record.from > from ? record.from : from;
-  const actualTo = record.to < to ? record.to : to;
-  if (actualFrom > actualTo) return null;
-  return validateHistoryRecord({
-    ...record,
-    from: actualFrom,
-    to: actualTo,
-    points: record.points.filter(point => point.date >= actualFrom && point.date <= actualTo),
-    lastUsedAt: now,
-  });
-}
-
-function matchingRecord({ records, base, quote, from, to, period, now }) {
+/** Find the best saved series for a range. Full coverage is best. If there is none,
+ * the interval from an earlier day is a preview while the new interval loads. */
+function findSaved({ records, base, quote, from, to, period, now }) {
   const samePair = records.filter(record => record.base === base && record.quote === quote);
-  const covering = samePair.filter(record => covers({ record, from, to }));
+  const fresh = record => Number(isFresh({ checkedAt: record.checkedAt, maxAge: HOUR, now }));
+  const covering = samePair.filter(record => record.from <= from && record.to >= to);
   if (covering.length) {
-    covering.sort((a, b) => Number(isFresh({ checkedAt: b.checkedAt, maxAge: HOUR, now })) - Number(isFresh({ checkedAt: a.checkedAt, maxAge: HOUR, now }))
-      || b.checkedAt - a.checkedAt
-      || rangeDays({ from: a.from, to: a.to }) - rangeDays({ from: b.from, to: b.to }));
-    return { record: covering[0], full: true };
+    covering.sort((a, b) => fresh(b) - fresh(a) || b.checkedAt - a.checkedAt || days(a) - days(b));
+    return { source: covering[0], record: view({ record: covering[0], from, to }), full: true };
   }
-  const wantedDays = rangeDays({ from, to });
+  const wanted = days({ from, to });
   const tolerance = PERIOD_TOLERANCE_DAYS[period];
-  const previous = samePair.filter(record => record.to < to
-    && Math.abs(rangeDays({ from: record.from, to: record.to }) - wantedDays) <= tolerance
-    && rangeDays({ from: record.from > from ? record.from : from, to: record.to < to ? record.to : to }) >= wantedDays - tolerance);
-  previous.sort((a, b) => b.to.localeCompare(a.to) || b.checkedAt - a.checkedAt);
-  return previous.length ? { record: previous[0], full: false } : null;
+  const overlap = record => days({ from: record.from > from ? record.from : from, to: record.to < to ? record.to : to });
+  const earlier = samePair.filter(record => record.to < to
+    && Math.abs(days(record) - wanted) <= tolerance
+    && overlap(record) >= wanted - tolerance);
+  if (!earlier.length) return null;
+  earlier.sort((a, b) => (a.to < b.to ? 1 : a.to > b.to ? -1 : b.checkedAt - a.checkedAt));
+  return { source: earlier[0], record: view({ record: earlier[0], from, to }), full: false };
 }
 
-function abortError(error, signal) {
-  return signal.aborted || error?.name === 'AbortError' || error?.name === 'CanceledError';
-}
-
-/** @param {{storage:{readHistoryRecords:()=>Promise<HistoryRecord[]>,writeHistory:(record:HistoryRecord)=>Promise<boolean>},onChange:(state:HistoryState)=>void,fetchHistory?:typeof fetchHistory,now?:()=>number}} options */
+/** Load one pair and period at a time. A new selection cancels the previous request.
+ * @param {{storage:{readHistoryRecords:()=>Promise<HistoryRecord[]>,writeHistory:(record:HistoryRecord)=>Promise<boolean>},onChange:(state:HistoryState)=>void,fetchHistory?:typeof fetchHistory,now?:()=>number}} options */
 export function createHistoryController({ storage, onChange, fetchHistory: loader = fetchHistory, now = Date.now }) {
   /** @type {HistoryState} */ let state = { phase: 'idle', record: null, error: null, retryAt: null, refreshing: false };
-  let active = null, generation = 0, destroyed = false, failures = 0, retryAt = null, serverCooldown = false;
+  let active = null, generation = 0, failures = 0, retryAt = null, serverCooldown = false;
+  // The range that `state` describes. A repeated load of this range keeps the visible series.
+  let shownKey = null;
 
   const publish = patch => {
     state = { ...state, ...patch };
-    if (!destroyed) onChange({ ...state, record: state.record ? { ...state.record, points: state.record.points.map(point => ({ ...point })) } : null });
+    onChange(state);
     return state;
   };
 
@@ -91,67 +71,61 @@ export function createHistoryController({ storage, onChange, fetchHistory: loade
   };
 
   function load({ base, quote, period, online = true, force = false }) {
-    if (destroyed) return Promise.resolve({ ...state });
     if (!CODE.test(base) || !CODE.test(quote) || base === quote || !HISTORY_PERIODS.includes(period)) return Promise.reject(new Error('The history selection is invalid.'));
     const { from, to } = getHistoryRange({ period, now: now() });
     const key = `${base}:${quote}:${from}:${to}`;
-    if (active?.key === key && (online || !active.online)) return active.promise;
+    if (active?.key === key && active.online === online) return active.promise;
+    const shown = key === shownKey ? state.record : null;
+    const settled = state.phase === 'ready' && !state.refreshing;
+    // The visible series is complete and recent. There is nothing to do.
+    if (shown && settled && online && !force && isFresh({ checkedAt: shown.checkedAt, maxAge: HOUR, now: now() })) return Promise.resolve(state);
     const id = cancelActive();
     const controller = new AbortController();
-    publish({ phase: 'loading', record: null, error: null, retryAt, refreshing: false });
+    shownKey = key;
+    if (!shown) publish({ phase: 'loading', record: null, error: null, retryAt, refreshing: false });
 
     const work = (async () => {
-      let saved = [];
-      try { saved = await storage.readHistoryRecords(); } catch { /* A network request can still succeed. */ }
-      if (destroyed || id !== generation) return { ...state };
-      const validSaved = [];
-      for (const item of saved || []) {
-        try { validSaved.push(validateHistoryRecord(item)); } catch { /* Ignore corrupt cache entries. */ }
-      }
-      const match = matchingRecord({ records: validSaved, base, quote, from, to, period, now: now() });
-      const candidate = match?.full ? exactCachedView({ record: match.record, from, to, now: now() })
-        : match ? previousIntervalView({ record: match.record, from, to, now: now() }) : null;
-      if (candidate) {
-        // Update LRU use time without changing the check time.
-        void storage.writeHistory({ ...match.record, lastUsedAt: now() }).catch(() => false);
-        const fresh = match.full && isFresh({ checkedAt: candidate.checkedAt, maxAge: HOUR, now: now() });
-        if (!online) return publish({ phase: 'offline', record: candidate, error: null, retryAt, refreshing: false });
-        if (fresh && !force) return publish({ phase: 'ready', record: candidate, error: null, retryAt, refreshing: false });
-        publish({ phase: 'ready', record: candidate, error: null, retryAt, refreshing: true });
+      let records = [];
+      try { records = await storage.readHistoryRecords(); } catch { /* A network request can still succeed. */ }
+      if (id !== generation) return state;
+      const saved = findSaved({ records, base, quote, from, to, period, now: now() });
+      const record = saved?.record ?? null;
+      if (saved) {
+        // Count this use for the cache's least-recently-used order. One write an hour is enough.
+        if (now() - saved.source.lastUsedAt >= HOUR) void storage.writeHistory({ ...saved.source, lastUsedAt: now() });
+        const fresh = saved.full && isFresh({ checkedAt: record.checkedAt, maxAge: HOUR, now: now() });
+        if (!online) return publish({ phase: 'offline', record, error: null, retryAt, refreshing: false });
+        if (fresh && !force) return publish({ phase: 'ready', record, error: null, retryAt, refreshing: false });
+        publish({ phase: 'ready', record, error: null, retryAt, refreshing: true });
       } else if (!online) {
         return publish({ phase: 'offline', record: null, error: null, retryAt, refreshing: false });
       }
 
       if (retryAt !== null && now() < retryAt && (serverCooldown || !force)) {
-        const message = serverCooldown ? 'The history service asked us to wait before trying again.' : 'History could not be updated yet.';
-        return publish({ phase: 'error', record: candidate, error: message, retryAt, refreshing: false });
+        const error = serverCooldown ? 'The history service asked us to wait before trying again.' : 'History could not be updated yet.';
+        return publish({ phase: 'error', record, error, retryAt, refreshing: false });
       }
 
+      let fetched;
       try {
-        const record = validateHistoryRecord(await loader({ base, quote, from, to, signal: controller.signal, now }));
-        if (destroyed || id !== generation) return { ...state };
-        if (record.base !== base || record.quote !== quote || record.from !== from || record.to !== to) throw new Error('The history service returned a different range.');
-        const updated = { ...record, lastUsedAt: now() };
-        failures = 0;
-        serverCooldown = false;
-        retryAt = null;
-        publish({ phase: 'ready', record: updated, error: null, retryAt: null, refreshing: false });
-        try { await storage.writeHistory(updated); } catch { /* Keep the fetched series available in memory for this view. */ }
-        return { ...state };
+        fetched = validateHistoryRecord(await loader({ base, quote, from, to, signal: controller.signal, now }));
+        if (fetched.base !== base || fetched.quote !== quote || fetched.from !== from || fetched.to !== to) throw new Error('The history service returned a different range.');
       } catch (error) {
-        if (destroyed || id !== generation || abortError(error, controller.signal)) return { ...state };
-        if (error?.status === 404) {
-          const checkedAt = now();
-          const empty = validateHistoryRecord({ base, quote, from, to, points: [], checkedAt, lastUsedAt: checkedAt });
-          publish({ phase: 'ready', record: empty, error: null, retryAt, refreshing: false });
-          try { await storage.writeHistory(empty); } catch { /* Keep the empty result for this view. */ }
-          return { ...state };
+        if (id !== generation || controller.signal.aborted || error?.name === 'AbortError') return state;
+        if (error?.status !== 404) {
+          serverCooldown = error?.status === 429;
+          retryAt = now() + retryDelay({ error, failures: serverCooldown ? failures : failures++ });
+          return publish({ phase: 'error', record, error: error?.message || 'History could not be loaded.', retryAt, refreshing: false });
         }
-        const delay = error?.status === 429 ? error.retryAfterMs ?? 900000 : RETRY_DELAYS[Math.min(failures++, RETRY_DELAYS.length - 1)];
-        serverCooldown = error?.status === 429;
-        retryAt = now() + delay;
-        return publish({ phase: 'error', record: candidate, error: error?.message || 'History could not be loaded.', retryAt, refreshing: false });
+        // The service has no data for this pair. Save that result as an empty series.
+        const checkedAt = now();
+        fetched = { base, quote, from, to, points: [], checkedAt, lastUsedAt: checkedAt };
       }
+      if (id !== generation) return state;
+      failures = 0; serverCooldown = false; retryAt = null;
+      publish({ phase: 'ready', record: fetched, error: null, retryAt, refreshing: false });
+      try { await storage.writeHistory(fetched); } catch { /* The series stays on the screen for this view. */ }
+      return state;
     })();
     const promise = work.finally(() => { if (active?.id === id) active = null; });
     active = { id, key, controller, promise, online };
@@ -161,17 +135,10 @@ export function createHistoryController({ storage, onChange, fetchHistory: loade
   return {
     load,
     deactivate() {
-      if (destroyed) return;
       cancelActive();
+      shownKey = null;
       publish({ phase: 'idle', record: null, error: null, retryAt, refreshing: false });
     },
-    getState() { return { ...state, record: state.record ? { ...state.record, points: state.record.points.map(point => ({ ...point })) } : null }; },
-    destroy() {
-      if (destroyed) return;
-      cancelActive();
-      destroyed = true;
-    },
+    getState: () => state,
   };
 }
-
-/** @typedef {{phase:'idle'|'loading'|'ready'|'offline'|'error',record:HistoryRecord|null,error:string|null,retryAt:number|null,refreshing:boolean}} HistoryState */

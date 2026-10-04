@@ -328,6 +328,30 @@ test('chart point selection works with keyboard and pointer', async ({ page }) =
   await expect.poll(() => chart.getAttribute('data-chart-point')).not.toBe(last);
 });
 
+test('a window focus keeps the selected point and does not draw or request the fresh series again', async ({ page }) => {
+  const calls = await mockApi(page);
+  await page.goto('/');
+  await openChart(page);
+  await waitForHistory(page);
+  await expect.poll(() => hasSavedHistory(page)).toBe(true);
+  const chart = page.locator('#history-chart');
+  await chart.focus();
+  await page.keyboard.press('Home');
+  await expect(chart).toHaveAttribute('data-chart-point', '0');
+  const readout = await page.locator('#chart-point-readout').innerText();
+  const renders = () => page.evaluate(() => performance.getEntriesByName('fex:chart-render').length);
+  const before = await renders();
+
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await savedKeys(page);
+  await savedKeys(page);
+  await expect(chart).toHaveAttribute('data-chart-point', '0');
+  await expect(page.locator('#chart-point-readout')).toHaveText(readout);
+  await expect(page.locator('#chart-status')).toHaveAttribute('data-phase', 'ready');
+  expect(await renders()).toBe(before);
+  expect(calls.history).toBe(1);
+});
+
 test('the chart draws one time for each loaded series', async ({ page }) => {
   await mockApi(page);
   await page.goto('/');
