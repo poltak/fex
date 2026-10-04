@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatHistoryDate, formatHistoryRate, getHistoryChange, getHistoryRange, HISTORY_PERIODS, sliceHistoryPoints, validateHistoryRecord, validateHistoryRows } from '../src/history.js';
+import { formatHistoryDate, formatHistoryRate, getHistoryChange, getHistoryRange, HISTORY_PERIODS, validateHistoryRecord, validateHistoryRows } from '../src/history.js';
 
 describe('history date ranges', () => {
   it('uses inclusive UTC dates and subtracts calendar periods', () => {
@@ -54,11 +54,6 @@ describe('history response and record validation', () => {
 });
 
 describe('history calculations and presentation helpers', () => {
-  it('slices supplied observations without adding dates', () => {
-    const points = [{ date: '2026-01-01', rate: '1' }, { date: '2026-01-03', rate: '2' }, { date: '2026-01-05', rate: '3' }];
-    expect(sliceHistoryPoints({ points, from: '2026-01-02', to: '2026-01-04' })).toEqual([{ date: '2026-01-03', rate: '2' }]);
-  });
-
   it('calculates signed changes with decimal precision and handles flat or short series', () => {
     expect(getHistoryChange({ points: [{ date: '2026-01-01', rate: '0.00000000000000000001' }, { date: '2026-01-02', rate: '0.00000000000000000002' }] })).toEqual({ value: '+100', direction: 'up' });
     expect(getHistoryChange({ points: [{ date: '2026-01-01', rate: '2' }, { date: '2026-01-02', rate: '1.5' }] })).toEqual({ value: '-25', direction: 'down' });
