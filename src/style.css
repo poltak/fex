@@ -69,7 +69,6 @@
   .amount { width: 100%; flex: 1 1 0; padding: 4px 0; border: 0; background: none; text-align: right; font-size: 29px; line-height: 1.3; font-weight: 530; font-variant-numeric: tabular-nums; letter-spacing: -.6px; border-radius: 2px; }
   .amount:focus-visible { outline: 0; }
   .amount::placeholder { color: #647369; }
-  .amount:disabled { opacity: .6; }
   .currency-card[data-source="true"] .amount { color: #d6f3dc; }
   .card-bottom { min-height: 23px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 7px; }
   .source-label { visibility: hidden; color: var(--accent); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding-left: 45px; }
@@ -111,10 +110,9 @@
   .manage-row { display: flex; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid #263129; }
   .manage-row .identity-copy { flex: 1; }
   .manage-actions { display: flex; gap: 0; }
-  .manage-actions .icon-button { width: 44px; border-radius: 9px; padding: 10px; }
+  .manage-actions .icon-button { border-radius: 9px; }
   .manage-actions .remove { color: #dbaaa0; }
   .manage-feedback { flex: 1; align-self: center; color: var(--muted); font-size: 12px; }
-  .manage-row.drag-over { border-top: 2px solid var(--accent); }
   .menu-dialog { max-width: 370px; }
   .menu-items { display: grid; margin-bottom: 17px; }
   .menu-items button { display: flex; justify-content: space-between; gap: 12px; border: 0; background: none; min-height: 55px; text-align: left; padding: 12px 2px; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -131,7 +129,7 @@
   .chart-currency:hover { border-color: #657e69; background: #1c241e; }
   .chart-currency-code { font-size: 15px; font-weight: 670; letter-spacing: .5px; }
   .chart-currency-name { min-width: 0; max-width: 100%; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  .chart-swap { width: 44px; height: 44px; border-color: var(--line); color: #bbc6bd; }
+  .chart-swap { border-color: var(--line); color: #bbc6bd; }
   .chart-summary { margin: 0 0 19px; }
   .chart-rate { overflow-wrap: anywhere; font-size: clamp(19px, 5vw, 25px); line-height: 1.25; font-weight: 620; letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
   .chart-rate-date { min-height: 18px; margin-top: 5px; color: var(--muted); font-size: 11px; }
@@ -181,7 +179,6 @@
     .amount { font-size: 25px; }
     .currency-name { font-size: 10px; }
     .dialog { padding: 19px; }
-    .manage-actions .icon-button { width: 44px; }
     .chart-pair { gap: 7px; margin: 19px 0; }
     .chart-currency { padding: 10px 9px; }
     .chart-currency-name { font-size: 9px; }

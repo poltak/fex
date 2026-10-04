@@ -1,54 +1,42 @@
-/** @param {{onUpdate?: (available: boolean) => void, onInstallAvailable?: (available: boolean) => void, onInstalled?: () => void, onOfflineReady?: () => void}} [options] */
-export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, onInstalled = () => {}, onOfflineReady = () => {} } = {}) {
+/** Service worker registration, the update notice, and the install prompt.
+ * @param {{onUpdate?: (available: boolean) => void, onInstallAvailable?: (available: boolean) => void, onInstalled?: () => void}} [options] */
+export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, onInstalled = () => {} } = {}) {
   let registration;
   /** @type {any} */
   let installPrompt;
   let accepted = false;
-  let disposed = false;
   let reloaded = false;
-  const removers = [];
-  const listen = (target, name, fn) => {
-    target.addEventListener(name, fn);
-    removers.push(() => target.removeEventListener(name, fn));
-  };
   const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || /** @type {Navigator & {standalone?: boolean}} */ (navigator).standalone === true;
-  const syncUpdate = () => {
-    if (!disposed) onUpdate(Boolean(registration?.active && registration.waiting?.state === 'installed'));
-  };
+  // An update is available only when this app's active worker has a successor that waits.
+  const syncUpdate = () => onUpdate(Boolean(registration?.active && registration.waiting?.state === 'installed'));
+  // The worker removes old asset caches when the only open tab runs the worker's build.
   const announceReady = () => {
-    if (!disposed && !document.hidden) navigator.serviceWorker?.controller?.postMessage({ type: 'FEX_CLIENT_READY', version: __FEX_BUILD_ID__ });
+    if (!document.hidden) navigator.serviceWorker?.controller?.postMessage({ type: 'FEX_CLIENT_READY', version: __FEX_BUILD_ID__ });
   };
-  listen(window, 'focus', announceReady);
-  listen(document, 'visibilitychange', announceReady);
-  listen(window, 'beforeinstallprompt', event => {
+  window.addEventListener('focus', announceReady);
+  document.addEventListener('visibilitychange', announceReady);
+  window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault(); installPrompt = event; onInstallAvailable(!isStandalone());
   });
-  listen(window, 'appinstalled', () => {
+  window.addEventListener('appinstalled', () => {
     installPrompt = undefined; onInstallAvailable(false); onInstalled();
   });
-  if ('serviceWorker' in navigator) listen(navigator.serviceWorker, 'controllerchange', () => {
+  navigator.serviceWorker?.addEventListener('controllerchange', () => {
     syncUpdate();
+    // Reload only the tab where the user accepted the update.
     if (accepted && !reloaded) { reloaded = true; window.location.reload(); }
     else announceReady();
   });
   return {
     isStandalone,
     async register() {
-      if (disposed || !('serviceWorker' in navigator) || !import.meta.env.PROD) return;
+      if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
       try {
         registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL, updateViaCache: 'none' });
-        if (disposed) return;
-        const observe = worker => {
-          if (!worker) return;
-          listen(worker, 'statechange', () => {
-            syncUpdate();
-            if (worker.state === 'installed' && !registration.active) onOfflineReady();
-          });
-        };
-        const watch = () => observe(registration.installing);
-        listen(registration, 'updatefound', watch);
+        const observe = worker => worker?.addEventListener('statechange', syncUpdate);
+        registration.addEventListener('updatefound', () => observe(registration.installing));
         observe(registration.waiting);
-        watch();
+        observe(registration.installing);
         syncUpdate();
         announceReady();
       } catch { /* Conversion still works when the browser blocks service workers. */ }
@@ -67,6 +55,5 @@ export function createPwa({ onUpdate = () => {}, onInstallAvailable = () => {}, 
       await prompt.prompt();
       return (await prompt.userChoice).outcome === 'accepted';
     },
-    dispose() { disposed = true; removers.splice(0).forEach(remove => remove()); },
   };
 }

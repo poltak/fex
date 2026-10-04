@@ -1,8 +1,7 @@
 export const DEFAULT_CODES = ['VND', 'USD', 'EUR', 'SGD', 'AUD', 'THB', 'GBP', 'IDR'];
 export const DEFAULT_SOURCE = 'USD';
 export const DEFAULT_AMOUNT = '10';
-// Official https://api.frankfurter.dev/v2/currencies snapshot.
-export const FALLBACK_CATALOG_DATE = '2026-09-26';
+// Snapshot of https://api.frankfurter.dev/v2/currencies from 2026-09-26.
 export const OTHER_UNIT_CODES = new Set(['XAG', 'XAU', 'XPD', 'XPT', 'XDR', 'CMD']);
 export const FALLBACK_CATALOG = [
   {
