@@ -53,3 +53,17 @@ export async function openManage(page) {
   await page.getByRole('button', { name: 'Open app menu' }).click();
   await page.getByRole('button', { name: /Manage currencies/ }).click();
 }
+
+/** Read the saved cache keys. The read also waits for the app's earlier storage work to finish. */
+export async function savedKeys(page) {
+  return page.evaluate(() => new Promise(resolve => {
+    const request = indexedDB.open('fex-cache', 1);
+    request.onerror = () => resolve([]);
+    request.onsuccess = () => {
+      const db = request.result;
+      const keys = db.transaction('cache').objectStore('cache').getAllKeys();
+      keys.onsuccess = () => { db.close(); resolve(keys.result.map(String)); };
+      keys.onerror = () => { db.close(); resolve([]); };
+    };
+  }));
+}

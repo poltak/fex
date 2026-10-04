@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { FALLBACK_CATALOG } from '../../src/catalog.js';
-import { amount, mockApi, openManage, rateRows, catalog } from './fixtures.js';
+import { amount, mockApi, openManage, rateRows, catalog, savedKeys } from './fixtures.js';
 
 // These tests use deterministic API routes. An active worker can route a fetch
 // outside page.route in WebKit. Real worker behavior has separate PWA tests.
@@ -165,6 +165,23 @@ test('refreshes when due and applies rates after an active edit', async ({ page 
   await amount(page, 'USD').press('Enter');
   await expect(amount(page, 'EUR')).toHaveValue('180.00');
   await expect(amount(page, 'USD')).toHaveValue('100.00');
+});
+
+test('keeps Retry available when the window gets focus after a failed refresh', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/');
+  await expect(amount(page, 'VND')).toHaveValue('260,000');
+  await expect.poll(() => savedKeys(page)).toContain('rates');
+  await mockApi(page, { status: 503 });
+  await page.clock.fastForward(61 * 60000);
+  const retry = page.getByRole('button', { name: 'Retry', exact: true });
+  await expect(page.getByText('Could not update — using saved rates')).toBeVisible();
+  await expect(retry).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await savedKeys(page);
+  await expect(page.getByText('Could not update — using saved rates')).toBeVisible();
+  await expect(retry).toBeVisible();
+  await expect(page.locator('#rate-status')).toHaveAttribute('data-phase', 'error');
 });
 
 test('fits a narrow phone, keeps picker keyboard access, and has no page errors', async ({ page }) => {

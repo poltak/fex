@@ -91,6 +91,9 @@ describe('rate controller', () => {
     const x = setup(); x.setSource('JPY'); await x.controller.refresh();
     expect(x.apply).toHaveBeenCalledTimes(1); expect(x.storage.writeRates).toHaveBeenCalled();
     expect(x.controller.getStatus()).toMatchObject({ phase: 'error', error: 'The source currency has no current rate.' });
+    await x.controller.refresh();
+    expect(x.loader).toHaveBeenCalledTimes(1);
+    expect(x.controller.getStatus()).toMatchObject({ phase: 'error', error: 'The source currency has no current rate.' });
   });
   it('applies a cold-start partial table after the draft ends', async () => {
     const x = setup(); x.setSource('JPY'); x.setEditing(true); await x.controller.refresh(); expect(x.apply).not.toHaveBeenCalled();
@@ -106,6 +109,13 @@ describe('rate controller', () => {
     const x = setup({ saved: snapshot(100) }); await x.controller.restore();
     expect(x.controller.acceptSaved(snapshot(99))).toBe(false); expect(x.controller.acceptSaved(snapshot(200, '2026-09-24'))).toBe(false);
     x.setEditing(true); expect(x.controller.acceptSaved(snapshot(300))).toBe(true); expect(x.controller.getStatus().pending).toBe(true);
+  });
+  it('keeps the error status when a saved snapshot is not newer', async () => {
+    const x = setup({ saved: snapshot(100), loader: vi.fn().mockRejectedValue(new Error('Network failed')) });
+    await x.controller.restore(); await x.controller.refresh();
+    expect(x.controller.getStatus()).toMatchObject({ phase: 'error', error: 'Network failed', retryAt: 4060000 });
+    expect(x.controller.acceptSaved(snapshot(100))).toBe(false);
+    expect(x.controller.getStatus()).toMatchObject({ phase: 'error', error: 'Network failed', retryAt: 4060000 });
   });
   it('updates the check time when rates are unchanged', async () => {
     const x = setup({ saved: snapshot(100) }); await x.controller.restore(); await x.controller.refresh();

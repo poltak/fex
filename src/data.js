@@ -90,7 +90,8 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
   const emit = (patch = {}) => { status = { ...status, ...patch, checkedAt: displayed?.checkedAt ?? null, pending: !!pending }; if (!destroyed) onStatus({ ...status }); };
   const adopt = (snapshot, network = false) => {
     if (destroyed) return false;
-    if (latest && snapshot.checkedAt <= latest.checkedAt && !(network && future(latest) && !future(snapshot))) { emit({ phase: displayed ? 'ready' : 'loading' }); return false; }
+    // A snapshot that is not newer changes nothing. Keep the status, which can be an error with Retry.
+    if (latest && snapshot.checkedAt <= latest.checkedAt && !(network && future(latest) && !future(snapshot))) return false;
     if (latest && Object.entries(snapshot.rates).some(([code, row]) => latest.rates[code] && row.date < latest.rates[code].date)) { emit({ phase: 'error', error: 'The service returned older rate dates.' }); return false; }
     const missingSource = !snapshot.rates[getSource()];
     if (missingSource && displayed?.rates[getSource()]) { emit({ phase: 'error', error: 'The source currency has no current rate.' }); return false; }
@@ -112,7 +113,11 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
       if (!online) { emit({ phase: 'offline', error: null }); return Promise.resolve(); }
       if (inflight) return inflight;
       if (status.retryAt && now() < status.retryAt && (cooldown || !force)) return Promise.resolve();
-      if (!force && latest && isFresh({ checkedAt: latest.checkedAt, maxAge: HOUR, now: now() })) { emit({ phase: 'ready' }); return Promise.resolve(); }
+      if (!force && latest && isFresh({ checkedAt: latest.checkedAt, maxAge: HOUR, now: now() })) {
+        // No request is necessary. This also ends the offline phase. A problem with the saved table stays visible.
+        emit({ phase: status.error ? 'error' : 'ready' });
+        return Promise.resolve();
+      }
       abort = new AbortController();
       emit({ phase: displayed ? 'refreshing' : 'loading', error: null });
       inflight = (async () => {
