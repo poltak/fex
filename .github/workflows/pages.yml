@@ -75,7 +75,6 @@ jobs:
           cache: pnpm
       - name: Read Pages configuration without enabling it
         id: metadata
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,7 +101,7 @@ jobs:
             : 'The workflow will build for `/fex/`, but deployment is skipped. Open **Settings → Pages**, set **Source** to **GitHub Actions**, then run **Check and deploy** from the **Actions** tab on `main`. This workflow does not enable Pages through the API.\n'));
           NODE
       - name: Configure enabled Pages site
-        if: steps.metadata.outputs.enabled == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: steps.metadata.outputs.enabled == 'true'
         id: pages
         uses: actions/configure-pages@v5
         with:
@@ -120,7 +119,7 @@ jobs:
           pnpm run build 2>&1 | tee pages-build.log
           pnpm run check:size 2>&1 | tee -a pages-build.log
       - name: Upload Pages artifact
-        if: steps.metadata.outputs.enabled == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        if: steps.metadata.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
           path: dist
@@ -136,6 +135,7 @@ jobs:
 
   deploy:
     name: Deploy Pages
+    # This job can write to Pages, so it keeps its own branch and event condition.
     if: needs.pages-build.outputs.pages_enabled == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: pages-build
     runs-on: ubuntu-latest
