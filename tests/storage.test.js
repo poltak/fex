@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { createStorage } from '../src/storage.js';
 const prefs = { codes: ['USD', 'EUR'], source: 'USD', amount: '10.25' };
 const rates = { base: 'USD', checkedAt: 100, rates: { USD: { rate: '1', date: '2026-09-25' }, EUR: { rate: '0.9', date: '2026-09-25' } } };
@@ -8,7 +8,7 @@ function historyRecord(index, lastUsedAt = index) {
   return { base: 'USD', quote: 'EUR', from: `2026-09-${day}`, to: `2026-09-${String(index + 2).padStart(2, '0')}`, points: [], checkedAt: index, lastUsedAt };
 }
 function localStore() { const map = new Map(); return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map }; }
-function setup(options = {}) { return createStorage({ indexedDB: new IDBFactory(), localStorage: localStore(), BroadcastChannel: null, ...options }); }
+function setup(options = {}) { return createStorage({ indexedDB: new IDBFactory(), IDBKeyRange, localStorage: localStore(), BroadcastChannel: null, ...options }); }
 afterEach(() => vi.useRealTimers());
 describe('storage', () => {
   it('bounds a stalled open and closes a connection that arrives too late', async () => {
@@ -145,6 +145,33 @@ describe('storage', () => {
     expect(await x.readCatalog()).toEqual({ items: [{ code: 'USD', name: 'Dollar', symbol: '' }], checkedAt: 1 });
     x.close();
   });
+  it('removes corrupt history and the excess from another tab when it loads the cache', async () => {
+    const indexedDB = new IDBFactory();
+    const a = setup({ indexedDB }); const b = setup({ indexedDB });
+    await a.readHistoryRecords(); await b.readHistoryRecords();
+    for (let index = 0; index < 12; index += 1) await a.writeHistory(historyRecord(index, index + 100));
+    await b.writeHistory(historyRecord(20, 50));
+    await a.writeRates(rates);
+    a.close(); b.close();
+    const database = await new Promise(resolve => { const request = indexedDB.open('fex-cache', 1); request.onsuccess = () => resolve(request.result); });
+    const store = () => database.transaction('cache', 'readwrite').objectStore('cache');
+    await new Promise(resolve => { store().put({ version: 1, value: { base: 'USD' } }, 'history:v1:corrupt').onsuccess = resolve; });
+    const savedKeys = () => new Promise(resolve => { const request = store().getAllKeys(); request.onsuccess = () => resolve(request.result); });
+    expect(await savedKeys()).toHaveLength(15);
+    database.close();
+
+    const c = setup({ indexedDB });
+    const saved = await c.readHistoryRecords();
+    expect(saved).toHaveLength(12);
+    expect(saved.some(record => record.from === '2026-09-21')).toBe(false);
+    expect(await c.readRates()).toEqual(rates);
+    c.close();
+    const check = await new Promise(resolve => { const request = indexedDB.open('fex-cache', 1); request.onsuccess = () => resolve(request.result); });
+    const keys = await new Promise(resolve => { const request = check.transaction('cache').objectStore('cache').getAllKeys(); request.onsuccess = () => resolve(request.result); });
+    expect(keys.filter(key => key.startsWith('history:v1:'))).toHaveLength(12);
+    expect(keys).toContain('rates');
+    check.close();
+  });
   it('does not keep a history record larger than two mebibytes', async () => {
     const x = setup();
     const oversized = { ...historyRecord(0), points: [{ date: '2026-09-01', rate: `1.${'0'.repeat(2 * 1024 * 1024)}` }] };
@@ -152,7 +179,7 @@ describe('storage', () => {
     expect(await x.readHistoryRecords()).toEqual([]);
     x.close();
   });
-  it('keeps newer memory history during delayed hydration and rejects stale writes', async () => {
+  it('keeps the newer of two history writes for one range and rejects the stale write', async () => {
     const indexedDB = new IDBFactory();
     const a = setup({ indexedDB });
     const previous = { ...historyRecord(0), checkedAt: Date.now() - 1000, lastUsedAt: Date.now() - 1000 };

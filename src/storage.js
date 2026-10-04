@@ -1,7 +1,10 @@
-import { validateCatalog, validateSnapshot } from './data.js';
+import { CLOCK_TOLERANCE, CODE, validateCatalog, validateSnapshot } from './data.js';
 import { HISTORY_PERIODS, validateHistoryRecord } from './history.js';
+
 /** @typedef {{codes:string[],source:string,amount:string,draft?:string}} Preferences */
 /** @typedef {{items:import('./data.js').Currency[],checkedAt:number}} CatalogRecord */
+/** @typedef {import('./history.js').HistoryRecord} HistoryRecord */
+
 const PREFS = 'fex:preferences:v1';
 const CHART_SETTINGS = 'fex:chart-settings:v1';
 const DB = 'fex-cache';
@@ -23,51 +26,59 @@ function transactionResult({ transaction, result }) {
     transaction.onabort = failed;
   });
 }
+
 function preferences(input) {
-  if (!input || !Array.isArray(input.codes) || !input.codes.length || input.codes.length > 512 || input.codes.some(code => typeof code !== 'string' || !/^[A-Z]{3}$/.test(code)) || new Set(input.codes).size !== input.codes.length || !input.codes.includes(input.source) || typeof input.amount !== 'string' || input.amount.length > 128 || input.amount.split('.')[0].length > 30 || (input.amount !== '' && !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(input.amount))) throw new Error('Saved preferences are invalid.');
+  const codes = input?.codes;
+  const validCodes = Array.isArray(codes) && codes.length > 0 && codes.length <= 512
+    && codes.every(code => typeof code === 'string' && CODE.test(code))
+    && new Set(codes).size === codes.length && codes.includes(input.source);
+  const amount = input?.amount;
+  const validAmount = typeof amount === 'string' && amount.length <= 128 && amount.split('.')[0].length <= 30
+    && (amount === '' || /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amount));
+  if (!validCodes || !validAmount) throw new Error('Saved preferences are invalid.');
   if (input.draft !== undefined && (typeof input.draft !== 'string' || input.draft.length > 128)) throw new Error('Saved draft is invalid.');
-  return { codes: [...input.codes], source: input.source, amount: input.amount, ...(input.draft !== undefined ? { draft: input.draft } : {}) };
+  return { codes: [...codes], source: input.source, amount, ...(input.draft !== undefined ? { draft: input.draft } : {}) };
 }
+
 function catalog(record) {
   if (!record || !Number.isFinite(record.checkedAt) || record.checkedAt < 0) throw new Error('Saved currency list is invalid.');
   return { items: validateCatalog(record.items), checkedAt: record.checkedAt };
 }
+
 function chartSettings(input) {
-  if (!input || typeof input.base !== 'string' || !/^[A-Z]{3}$/.test(input.base)
-    || typeof input.quote !== 'string' || !/^[A-Z]{3}$/.test(input.quote) || input.base === input.quote
+  if (!input || typeof input.base !== 'string' || !CODE.test(input.base)
+    || typeof input.quote !== 'string' || !CODE.test(input.quote) || input.base === input.quote
     || !HISTORY_PERIODS.includes(input.period)) throw new Error('Saved chart settings are invalid.');
   return { base: input.base, quote: input.quote, period: input.period };
 }
+
+// Each saved value has a version wrapper so that a later format can migrate it.
+function unwrap({ record, validate }) {
+  if (record?.version !== 1) throw new Error('Saved data has an unsupported version.');
+  return validate(record.value);
+}
+
+// A saved record is better than an incoming one with an earlier check time.
+// A time in the future does not count, because it means the device clock went back.
+function savedIsNewer({ saved, incoming }) {
+  return saved.checkedAt > incoming.checkedAt && saved.checkedAt <= Date.now() + CLOCK_TOLERANCE;
+}
+
 function historyKey(record) {
   return `${HISTORY_PREFIX}${record.base}:${record.quote}:${record.from}:${record.to}`;
 }
+
 function serializedSize(value) {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
-function pruneHistoryMap(records) {
-  const sorted = [...records.entries()].sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt);
-  let bytes = sorted.reduce((sum, [, record]) => sum + serializedSize(record), 0);
-  while (records.size > HISTORY_MAX_RECORDS || bytes > HISTORY_MAX_BYTES) {
-    const [key, record] = sorted.shift();
-    if (!key) break;
-    records.delete(key);
-    bytes -= serializedSize(record);
-  }
-}
-function mergeHistoryMemory({ records, incoming }) {
-  const key = historyKey(incoming);
-  const current = records.get(key);
-  let chosen = incoming;
-  if (current && current.checkedAt > incoming.checkedAt && current.checkedAt <= Date.now() + 300000) chosen = current;
-  else if (current && current.checkedAt === incoming.checkedAt) chosen = { ...current, lastUsedAt: Math.max(current.lastUsedAt, incoming.lastUsedAt) };
-  records.set(key, chosen);
-  return chosen;
-}
+
 /** Browser storage is optional. Memory remains usable if a browser blocks it. */
-export function createStorage({ onError = (_error) => {}, indexedDB: idb = undefined, localStorage: local = undefined, BroadcastChannel: Channel = globalThis.BroadcastChannel, eventTarget = globalThis.window } = {}) {
+export function createStorage({
+  onError = (_error) => {}, indexedDB: idb = undefined, localStorage: local = undefined,
+  BroadcastChannel: Channel = globalThis.BroadcastChannel, IDBKeyRange: KeyRange = globalThis.IDBKeyRange,
+  eventTarget = globalThis.window,
+} = {}) {
   const memory = new Map();
-  const historyMemory = new Map();
-  let chartSettingsMemory = null;
   const listeners = new Set();
   let closed = false, database = null, opening = null, channel = null;
   const report = error => onError(error instanceof Error ? error : new Error(String(error)));
@@ -76,11 +87,34 @@ export function createStorage({ onError = (_error) => {}, indexedDB: idb = undef
   try { if (Channel) channel = new Channel('fex:cache:v1'); } catch (error) { report(error); }
   const emit = value => { if (!closed) for (const listener of listeners) listener(value); };
   if (channel) channel.onmessage = event => { if (event.data?.type === 'rates') emit({ type: 'rates' }); };
+
+  // Preferences and chart settings are small. They use localStorage, which other tabs can observe.
+  function readLocal({ key, validate }) {
+    try {
+      const raw = local?.getItem(key);
+      if (raw) memory.set(key, unwrap({ record: JSON.parse(raw), validate }));
+    } catch (error) { report(error); }
+    return memory.get(key) ?? null;
+  }
+  function writeLocal({ key, input, validate }) {
+    try {
+      const value = validate(input);
+      memory.set(key, value);
+      if (!local) throw new Error('Saved preferences storage is unavailable.');
+      local.setItem(key, JSON.stringify({ version: 1, value }));
+      return true;
+    } catch (error) { report(error); return false; }
+  }
   const onStorage = event => {
     if (event.key !== PREFS || !event.newValue) return;
-    try { const record = JSON.parse(event.newValue); if (record.version !== 1) throw new Error('Saved preferences have an unsupported version.'); const value = preferences(record.value); memory.set('preferences', value); emit({ type: 'preferences', value }); } catch (error) { report(error); }
+    try {
+      const value = unwrap({ record: JSON.parse(event.newValue), validate: preferences });
+      memory.set(PREFS, value);
+      emit({ type: 'preferences', value });
+    } catch (error) { report(error); }
   };
   eventTarget?.addEventListener('storage', onStorage);
+
   function open() {
     if (closed) return Promise.reject(new Error('Storage is closed.'));
     if (database) return Promise.resolve(database);
@@ -108,28 +142,19 @@ export function createStorage({ onError = (_error) => {}, indexedDB: idb = undef
     });
     return opening;
   }
-  async function access(key) {
-    const db = await open();
-    const transaction = db.transaction('cache', 'readonly');
-    const request = transaction.objectStore('cache').get(key);
-    return transactionResult({ transaction, result: () => request.result });
-  }
-  async function accessAll() {
-    const db = await open();
-    const transaction = db.transaction('cache', 'readonly');
-    const store = transaction.objectStore('cache');
-    const keys = store.getAllKeys();
-    const values = store.getAll();
-    return transactionResult({ transaction, result: () => ({ keys: keys.result, values: values.result }) });
-  }
-  async function read(key, validate) {
+
+  async function read({ key, validate }) {
     try {
-      const record = await access(key);
-      if (record != null) { if (record.version !== 1) throw new Error('Saved cache has an unsupported version.'); const value = validate(record.value); memory.set(key, value); return value; }
+      const db = await open();
+      const transaction = db.transaction('cache', 'readonly');
+      const request = transaction.objectStore('cache').get(key);
+      const record = await transactionResult({ transaction, result: () => request.result });
+      if (record != null) memory.set(key, unwrap({ record, validate }));
     } catch (error) { report(error); }
     return memory.get(key) ?? null;
   }
-  async function write(key, input, validate) {
+
+  async function write({ key, input, validate }) {
     let value;
     try { value = validate(input); } catch (error) { report(error); return false; }
     memory.set(key, value);
@@ -141,141 +166,109 @@ export function createStorage({ onError = (_error) => {}, indexedDB: idb = undef
       const existing = store.get(key);
       let accepted = false;
       existing.onsuccess = () => {
-        let previous = null;
-        try { if (existing.result?.version === 1) previous = validate(existing.result.value); } catch { /* Replace corrupt records. */ }
-        if (previous && previous.checkedAt > value.checkedAt && previous.checkedAt <= Date.now() + 300000) { memory.set(key, previous); return; }
-        if (key === 'rates' && previous && Object.keys(value.rates).some(code => previous.rates[code] && value.rates[code].date < previous.rates[code].date)) { memory.set(key, previous); return; }
-        store.put({ version: 1, value }, key); accepted = true;
+        let saved = null;
+        try { saved = unwrap({ record: existing.result, validate }); } catch { /* Replace a corrupt or missing record. */ }
+        const olderDate = code => saved.rates[code] && value.rates[code].date < saved.rates[code].date;
+        if (saved && (savedIsNewer({ saved, incoming: value }) || (key === 'rates' && Object.keys(value.rates).some(olderDate)))) {
+          memory.set(key, saved);
+          return;
+        }
+        store.put({ version: 1, value }, key);
+        accepted = true;
       };
       const saved = await transactionResult({ transaction, result: () => accepted });
       if (saved && key === 'rates') channel?.postMessage({ type: 'rates' });
       return saved;
     } catch (error) { report(error); return false; }
   }
-  async function hydrateHistoryRecords() {
-    try {
-      const { keys, values } = await accessAll();
-      for (let index = 0; index < keys.length; index += 1) {
-        const key = keys[index];
-        if (typeof key !== 'string' || !key.startsWith(HISTORY_PREFIX)) continue;
-        try {
-          const wrapper = values[index];
-          if (wrapper?.version !== 1) throw new Error('Saved history has an unsupported version.');
-          const record = validateHistoryRecord(wrapper.value);
-          mergeHistoryMemory({ records: historyMemory, incoming: record });
-        } catch (error) { report(error); }
-      }
-    } catch (error) { report(error); }
-    pruneHistoryMap(historyMemory);
-    return copyHistoryRecords();
-  }
-  function copyHistoryRecords() {
-    return [...historyMemory.values()].map(record => ({ ...record, points: record.points.map(point => ({ ...point })) }));
-  }
-  function readHistoryRecords() {
-    if (historyMemory.size) {
-      void hydrateHistoryRecords();
-      return Promise.resolve(copyHistoryRecords());
+
+  // The history cache holds a small number of validated series and drops the least recently used one first.
+  // The map is the copy for this session. IndexedDB keeps the series between visits.
+  /** @type {Map<string,{record:HistoryRecord,size:number}>} */
+  const history = new Map();
+  let historyLoaded = null;
+
+  function pruneHistory() {
+    const removed = [];
+    const oldestFirst = [...history].sort((a, b) => a[1].record.lastUsedAt - b[1].record.lastUsedAt);
+    let bytes = oldestFirst.reduce((sum, [, entry]) => sum + entry.size, 0);
+    for (const [key, entry] of oldestFirst) {
+      if (history.size <= HISTORY_MAX_RECORDS && bytes <= HISTORY_MAX_BYTES) break;
+      history.delete(key);
+      bytes -= entry.size;
+      removed.push(key);
     }
-    return hydrateHistoryRecords();
+    return removed;
   }
+
+  // Read the saved series once. Writes wait for this, so the map starts empty here.
+  function loadHistory() {
+    historyLoaded ??= (async () => {
+      try {
+        const db = await open();
+        const transaction = db.transaction('cache', 'readwrite');
+        const store = transaction.objectStore('cache');
+        const range = KeyRange.bound(HISTORY_PREFIX, `${HISTORY_PREFIX}￿`);
+        const keys = store.getAllKeys(range);
+        const values = store.getAll(range);
+        values.onsuccess = () => {
+          keys.result.forEach((key, index) => {
+            try {
+              const record = unwrap({ record: values.result[index], validate: validateHistoryRecord });
+              if (historyKey(record) !== key) throw new Error('Saved history has the wrong key.');
+              history.set(key, { record, size: serializedSize(record) });
+            } catch { store.delete(key); /* A corrupt cache entry has no value. */ }
+          });
+          // Another tab can save more than the limit. Remove the excess.
+          for (const key of pruneHistory()) store.delete(key);
+        };
+        await transactionResult({ transaction, result: () => true });
+      } catch (error) { report(error); }
+    })();
+    return historyLoaded;
+  }
+
+  /** @returns {Promise<HistoryRecord[]>} Saved series. Do not change them. */
+  async function readHistoryRecords() {
+    await loadHistory();
+    return [...history.values()].map(entry => entry.record);
+  }
+
   async function writeHistory(input) {
     let record;
     try { record = validateHistoryRecord(input); } catch (error) { report(error); return false; }
+    const size = serializedSize(record);
+    if (size > HISTORY_MAX_BYTES) return false;
+    await loadHistory();
     const key = historyKey(record);
-    if (serializedSize(record) > HISTORY_MAX_BYTES) return false;
-    const current = historyMemory.get(key);
-    if (current && current.checkedAt > record.checkedAt && current.checkedAt <= Date.now() + 300000) return false;
-    if (current && current.checkedAt === record.checkedAt) record = { ...record, lastUsedAt: Math.max(current.lastUsedAt, record.lastUsedAt) };
-    historyMemory.set(key, record);
-    pruneHistoryMap(historyMemory);
+    const current = history.get(key)?.record;
+    if (current && savedIsNewer({ saved: current, incoming: record })) return false;
+    if (current?.checkedAt === record.checkedAt) record.lastUsedAt = Math.max(current.lastUsedAt, record.lastUsedAt);
+    history.set(key, { record, size });
+    const removed = pruneHistory();
+    const kept = history.has(key);
     try {
       const db = await open();
       const transaction = db.transaction('cache', 'readwrite');
       const store = transaction.objectStore('cache');
-      const existing = store.get(key);
-      let accepted = false;
-      existing.onsuccess = () => {
-        let previous = null;
-        try { if (existing.result?.version === 1) previous = validateHistoryRecord(existing.result.value); } catch { /* Replace corrupt history. */ }
-        if (previous && previous.checkedAt > record.checkedAt && previous.checkedAt <= Date.now() + 300000) {
-          mergeHistoryMemory({ records: historyMemory, incoming: previous });
-          return;
-        }
-        store.put({ version: 1, value: record }, key);
-        accepted = true;
-        const keysRequest = store.getAllKeys();
-        const valuesRequest = store.getAll();
-        let keysReady = false, valuesReady = false;
-        let keys = [], values = [];
-        const malformedKeys = [];
-        const prune = () => {
-          if (!keysReady || !valuesReady) return;
-          const records = [];
-          for (let index = 0; index < keys.length; index += 1) {
-            const savedKey = keys[index];
-            if (typeof savedKey !== 'string' || !savedKey.startsWith(HISTORY_PREFIX)) continue;
-            try {
-              const wrapper = values[index];
-              if (wrapper?.version !== 1) { malformedKeys.push(savedKey); continue; }
-              const saved = validateHistoryRecord(wrapper.value);
-              records.push({ key: savedKey, record: saved, size: serializedSize(saved) });
-            } catch { malformedKeys.push(savedKey); }
-          }
-          for (const malformedKey of malformedKeys) { store.delete(malformedKey); historyMemory.delete(malformedKey); }
-          records.sort((a, b) => a.record.lastUsedAt - b.record.lastUsedAt);
-          let bytes = records.reduce((sum, item) => sum + item.size, 0);
-          let count = records.length;
-          for (const item of records) {
-            if (count <= HISTORY_MAX_RECORDS && bytes <= HISTORY_MAX_BYTES) break;
-            store.delete(item.key);
-            historyMemory.delete(item.key);
-            count -= 1;
-            bytes -= item.size;
-          }
-          pruneHistoryMap(historyMemory);
-        };
-        keysRequest.onsuccess = () => { keys = keysRequest.result; keysReady = true; prune(); };
-        valuesRequest.onsuccess = () => { values = valuesRequest.result; valuesReady = true; prune(); };
-      };
-      await transactionResult({ transaction, result: () => accepted });
-      return accepted;
+      if (kept) store.put({ version: 1, value: record }, key);
+      for (const old of removed) store.delete(old);
+      return await transactionResult({ transaction, result: () => kept });
     } catch (error) { report(error); return false; }
   }
+
   return {
-    readPreferences() {
-      try { const raw = local?.getItem(PREFS); if (raw) { const record = JSON.parse(raw); if (record.version !== 1) throw new Error('Saved preferences have an unsupported version.'); const value = preferences(record.value); memory.set('preferences', value); return value; } } catch (error) { report(error); }
-      return memory.get('preferences') ?? null;
-    },
-    writePreferences(input) {
-      try { const value = preferences(input); memory.set('preferences', value); if (!local) throw new Error('Saved preferences storage is unavailable.'); local.setItem(PREFS, JSON.stringify({ version: 1, value })); return true; } catch (error) { report(error); return false; }
-    },
-    readRates: () => read('rates', validateSnapshot),
-    writeRates: value => write('rates', value, validateSnapshot),
-    readCatalog: () => read('catalog', catalog),
-    writeCatalog: value => write('catalog', value, catalog),
+    /** @returns {Preferences|null} */
+    readPreferences: () => readLocal({ key: PREFS, validate: preferences }),
+    writePreferences: input => writeLocal({ key: PREFS, input, validate: preferences }),
+    readChartSettings: () => readLocal({ key: CHART_SETTINGS, validate: chartSettings }),
+    writeChartSettings: input => writeLocal({ key: CHART_SETTINGS, input, validate: chartSettings }),
+    readRates: () => read({ key: 'rates', validate: validateSnapshot }),
+    writeRates: input => write({ key: 'rates', input, validate: validateSnapshot }),
+    readCatalog: () => read({ key: 'catalog', validate: catalog }),
+    writeCatalog: input => write({ key: 'catalog', input, validate: catalog }),
     readHistoryRecords,
     writeHistory,
-    readChartSettings() {
-      try {
-        const raw = local?.getItem(CHART_SETTINGS);
-        if (raw) {
-          const wrapper = JSON.parse(raw);
-          if (wrapper.version !== 1) throw new Error('Saved chart settings have an unsupported version.');
-          chartSettingsMemory = chartSettings(wrapper.value);
-          return { ...chartSettingsMemory };
-        }
-      } catch (error) { report(error); }
-      return chartSettingsMemory ? { ...chartSettingsMemory } : null;
-    },
-    writeChartSettings(input) {
-      try {
-        chartSettingsMemory = chartSettings(input);
-        if (!local) throw new Error('Saved chart settings storage is unavailable.');
-        local.setItem(CHART_SETTINGS, JSON.stringify({ version: 1, value: chartSettingsMemory }));
-        return true;
-      } catch (error) { report(error); return false; }
-    },
     subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
     close() { closed = true; database?.close(); channel?.close(); eventTarget?.removeEventListener('storage', onStorage); listeners.clear(); },
   };
