@@ -1,19 +1,31 @@
 /** @typedef {{code:string,name:string,symbol:string}} Currency */
 /** @typedef {{rate:string,date:string}} Rate */
 /** @typedef {{base:'USD',rates:Record<string,Rate>,checkedAt:number}} Snapshot */
-const CODE = /^[A-Z]{3}$/;
-const HOUR = 3600000;
-const CLOCK_TOLERANCE = 300000;
+export const CODE = /^[A-Z]{3}$/;
+export const HOUR = 3600000;
+export const CLOCK_TOLERANCE = 300000;
+const RETRY_DELAYS = [60000, 300000, 900000, HOUR];
 
 /** @param {{checkedAt:number,maxAge:number,now?:number}} options */
 export function isFresh({ checkedAt, maxAge, now = Date.now() }) {
   return Number.isFinite(checkedAt) && checkedAt >= 0 && checkedAt <= now + CLOCK_TOLERANCE && now - checkedAt < maxAge;
 }
-function validDate(date) {
-  return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date;
+/** A real calendar date in the YYYY-MM-DD form. */
+export function validDate(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const time = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date;
 }
-function validRate(rate) {
-  return (typeof rate === 'string' || typeof rate === 'number') && /^(?:\d+(?:\.\d+)?)(?:e[+-]?\d+)?$/i.test(String(rate)) && Number.isFinite(Number(rate)) && Number(rate) > 0;
+/** A finite, positive decimal number or numeric string. */
+export function validRate(rate) {
+  return (typeof rate === 'string' || typeof rate === 'number')
+    && /^\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(String(rate))
+    && Number.isFinite(Number(rate)) && Number(rate) > 0;
+}
+/** Wait time after a failed request. A 429 response uses the server's value. */
+export function retryDelay({ error, failures }) {
+  if (error?.status === 429) return error.retryAfterMs ?? 900000;
+  return RETRY_DELAYS[Math.min(failures, RETRY_DELAYS.length - 1)];
 }
 /** Validate the complete API catalog before using any row. @returns {Currency[]} */
 export function validateCatalog(rows) {
@@ -84,12 +96,14 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
   /** @type {Snapshot|null} */ let displayed = null;
   /** @type {Snapshot|null} */ let latest = null;
   /** @type {Snapshot|null} */ let pending = null;
-  let inflight = null, abort = null, destroyed = false, failures = 0, cooldown = false;
+  let inflight = null, failures = 0, cooldown = false;
   let status = { phase: 'loading', checkedAt: null, error: null, retryAt: null, pending: false };
   const future = snapshot => snapshot && snapshot.checkedAt > now() + CLOCK_TOLERANCE;
-  const emit = (patch = {}) => { status = { ...status, ...patch, checkedAt: displayed?.checkedAt ?? null, pending: !!pending }; if (!destroyed) onStatus({ ...status }); };
-  const adopt = (snapshot, network = false) => {
-    if (destroyed) return false;
+  const emit = (patch = {}) => {
+    status = { ...status, ...patch, checkedAt: displayed?.checkedAt ?? null, pending: !!pending };
+    onStatus({ ...status });
+  };
+  const adopt = ({ snapshot, network = false }) => {
     // A snapshot that is not newer changes nothing. Keep the status, which can be an error with Retry.
     if (latest && snapshot.checkedAt <= latest.checkedAt && !(network && future(latest) && !future(snapshot))) return false;
     if (latest && Object.entries(snapshot.rates).some(([code, row]) => latest.rates[code] && row.date < latest.rates[code].date)) { emit({ phase: 'error', error: 'The service returned older rate dates.' }); return false; }
@@ -102,14 +116,14 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
     return true;
   };
   const acceptSaved = snapshot => {
-    try { if (snapshot) return adopt(validateSnapshot(snapshot)); } catch { /* Ignore corrupt saved data. */ }
+    try { if (snapshot) return adopt({ snapshot: validateSnapshot(snapshot) }); } catch { /* Ignore corrupt saved data. */ }
     return false;
   };
   return {
     async restore() { try { acceptSaved(await storage.readRates()); } catch { /* Network can still recover. */ } },
     acceptSaved,
     refresh({ force = false, online = true, visible = true } = {}) {
-      if (destroyed || !visible) return Promise.resolve();
+      if (!visible) return Promise.resolve();
       if (!online) { emit({ phase: 'offline', error: null }); return Promise.resolve(); }
       if (inflight) return inflight;
       if (status.retryAt && now() < status.retryAt && (cooldown || !force)) return Promise.resolve();
@@ -118,35 +132,32 @@ export function createRateController({ storage, onApply, onStatus = (_status) =>
         emit({ phase: status.error ? 'error' : 'ready' });
         return Promise.resolve();
       }
-      abort = new AbortController();
       emit({ phase: displayed ? 'refreshing' : 'loading', error: null });
       inflight = (async () => {
         try {
-          const snapshot = validateSnapshot(await Promise.resolve().then(() => loader({ signal: abort.signal, now })));
-          if (destroyed) return;
+          // Start the loader in a later step, so that `inflight` is set before a loader that throws can clear it.
+          const snapshot = validateSnapshot(await Promise.resolve().then(() => loader({ now })));
           // A newer cross-tab record can supersede this request without failure.
           if (latest && snapshot.checkedAt <= latest.checkedAt && !(future(latest) && !future(snapshot))) { emit({ phase: displayed ? 'ready' : 'loading' }); return; }
-          if (!adopt(snapshot, true)) throw new Error(status.error || 'The rate response could not be applied.');
+          if (!adopt({ snapshot, network: true })) throw new Error(status.error || 'The rate response could not be applied.');
           failures = 0; cooldown = false;
           emit({ retryAt: null });
           await storage.writeRates(snapshot);
         } catch (error) {
-          if (destroyed) return;
-          const delay = error.status === 429 ? error.retryAfterMs ?? 900000 : [60000, 300000, 900000, HOUR][Math.min(failures++, 3)];
           cooldown = error.status === 429;
+          const delay = retryDelay({ error, failures: cooldown ? failures : failures++ });
           emit({ phase: 'error', error: error.message || 'Rates could not be updated.', retryAt: now() + delay });
         } finally { inflight = null; }
       })();
       return inflight;
     },
     flushPending() {
-      if (!pending || isEditing() || destroyed) return;
+      if (!pending || isEditing()) return;
       const missingSource = !pending.rates[getSource()];
       if (missingSource && displayed?.rates[getSource()]) { emit({ error: 'The source currency has no current rate.' }); return; }
       displayed = pending; pending = null; onApply(displayed);
       emit({ phase: missingSource ? 'error' : 'ready', error: missingSource ? 'The source currency has no current rate.' : null });
     },
     getStatus() { return { ...status }; },
-    destroy() { destroyed = true; abort?.abort(); },
   };
 }

@@ -136,8 +136,10 @@ describe('rate controller', () => {
     loader.mockRejectedValue(Object.assign(new Error('Busy'), { status: 429, retryAfterMs: 90000 })); await x.controller.refresh({ force: true });
     expect(x.controller.getStatus().retryAt).toBe(150000); await x.controller.refresh({ force: true }); expect(loader).toHaveBeenCalledTimes(3);
   });
-  it('aborts requests and prevents late application after destruction', async () => {
-    const d = deferred(); const x = setup({ loader: vi.fn(() => d.promise) }); const request = x.controller.refresh();
-    await Promise.resolve(); const signal = x.loader.mock.calls[0][0].signal; x.controller.destroy(); expect(signal.aborted).toBe(true); d.resolve(snapshot()); await request; expect(x.apply).not.toHaveBeenCalled();
+  it('recovers when the loader throws before it returns a promise', async () => {
+    const loader = vi.fn(() => { throw new Error('Loader failed'); }); const x = setup({ loader, time: 0 });
+    await x.controller.refresh(); expect(x.controller.getStatus()).toMatchObject({ phase: 'error', error: 'Loader failed', retryAt: 60000 });
+    loader.mockResolvedValue(snapshot(60000)); x.setTime(60000); await x.controller.refresh();
+    expect(loader).toHaveBeenCalledTimes(2); expect(x.controller.getStatus()).toMatchObject({ phase: 'ready', error: null });
   });
 });
